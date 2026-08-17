@@ -1,0 +1,137 @@
+export const BOARD_COLUMNS = [
+  { id: "inbox", label: "Inbox", color: "slate" },
+  { id: "ready", label: "Ready", color: "cyan" },
+  { id: "in_progress", label: "In progress", color: "amber" },
+  { id: "agent_review", label: "Agent review", color: "violet" },
+  { id: "human_review", label: "Human review", color: "rose" },
+  { id: "blocked", label: "Blocked", color: "red" },
+  { id: "done", label: "Done", color: "emerald" },
+] as const;
+
+export type TaskStatus = (typeof BOARD_COLUMNS)[number]["id"];
+export type AgentState = "idle" | "running" | "waiting" | "failed" | "succeeded";
+export type RunStatus = "queued" | "running" | "completed" | "failed" | "stopped";
+export type ExecutionMode = "demo" | "live";
+export type ActivityTone = "cyan" | "amber" | "violet" | "rose" | "red" | "green" | "slate";
+
+export interface RunCheck {
+  name: string;
+  command: string;
+  status: "pending" | "running" | "passed" | "failed" | "skipped";
+  output?: string;
+  durationMs?: number;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  fullName: string;
+  description: string;
+  initials: string;
+  accent: string;
+  localPath: string;
+  defaultBranch: string;
+  githubProjectId: string | null;
+  githubProjectUrl: string | null;
+  status: "connected" | "syncing" | "attention";
+  lastSyncedAt: string;
+  activeAgents: number;
+  openTasks: number;
+  openPrs: number;
+}
+
+export interface Task {
+  id: string;
+  projectId: string;
+  issueNumber: number | null;
+  title: string;
+  description: string;
+  status: TaskStatus;
+  priority: 1 | 2 | 3 | 4;
+  labels: string[];
+  assignee: "You" | "Agent" | null;
+  agentState: AgentState;
+  currentSummary: string;
+  branchName: string | null;
+  prUrl: string | null;
+  githubUrl: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+
+export interface AgentRun {
+  id: string;
+  taskId: string;
+  projectId: string;
+  mode: "start" | "continue" | "retry";
+  status: RunStatus;
+  sessionId: string | null;
+  branchName: string | null;
+  workspacePath: string | null;
+  progress: number;
+  currentActivity: string;
+  startedAt: string;
+  finishedAt: string | null;
+  error: string | null;
+  executionMode: ExecutionMode;
+  commitSha: string | null;
+  changedFiles: string[];
+  checks: RunCheck[];
+}
+
+export interface ActivityItem {
+  id: string;
+  projectId: string;
+  taskId: string | null;
+  runId: string | null;
+  type: string;
+  title: string;
+  detail: string | null;
+  tone: ActivityTone;
+  createdAt: string;
+}
+
+export interface RunEvent {
+  id: string;
+  runId: string;
+  type: string;
+  message: string;
+  detail: string | null;
+  createdAt: string;
+}
+
+export interface DashboardData {
+  projects: Project[];
+  tasks: Task[];
+  runs: AgentRun[];
+  activity: ActivityItem[];
+  runEvents: RunEvent[];
+  runtime: {
+    executionMode: ExecutionMode;
+    liveReady: boolean;
+    reason: string | null;
+  };
+}
+
+export function getColumnLabel(status: TaskStatus) {
+  return BOARD_COLUMNS.find((column) => column.id === status)?.label ?? status;
+}
+
+export function formatRelativeTime(value: string) {
+  const delta = Date.now() - new Date(value).getTime();
+  const minutes = Math.max(0, Math.floor(delta / 60000));
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+export function getInitials(name: string) {
+  return name
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
