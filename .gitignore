@@ -6,3 +6,8 @@ node_modules/
 *.log
 *.tsbuildinfo
 .DS_Store
+
+# Some developer machines globally ignore directories named `lib`; these are application source.
+!src/
+!src/lib/
+!src/lib/**
