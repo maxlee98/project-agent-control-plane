@@ -19,6 +19,9 @@ remote GitHub request is interrupted.
 - Treat missing agent output as unknown and recover by querying persisted state instead of rerunning blindly.
 - Prefer the editor/patch operation for file changes; do not use `cat > file`, `cat >> file`, or
   incomplete/interactively entered heredocs for agent-authored content.
+- For non-trivial multi-line Python, Bash, sh, or zsh edits, use the global
+  `scripted-edit-reliability` skill: create a temporary script with the editor/patch operation,
+  assert its inputs, execute it separately, verify the result, and clean it up only afterward.
 - Never start an interactive `python`/`python3` REPL or use shell-fed Python such as
   `python3 - <<'PY'` when the editor/patch operation is available. Use a short non-interactive
   command or create a script with the editor/patch operation and run it separately.
