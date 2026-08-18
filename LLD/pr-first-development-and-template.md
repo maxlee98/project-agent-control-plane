@@ -2,7 +2,7 @@
 
 ## Status
 
-- **Status:** In progress
+- **Status:** Complete
 - **Owner:** Project Agent Control Plane
 - **Date:** 2026-08-19
 - **Related task or issue:** Establish a mandatory pull-request workflow for every repository update, feature, bug fix, documentation change, and configuration change.
@@ -118,6 +118,15 @@ Rollback is reverting this documentation-only change. It has no runtime or datab
 5. Create a dedicated branch, commit the policy, push it, and open a PR; verify the remote URL/status.
 6. Do not merge automatically.
 
+### Validation results
+
+- `git diff --check`: passed before commit.
+- `npm test`: passed; 8 tests passed, 0 failed.
+- `npm run typecheck`: completed without TypeScript diagnostics.
+- `npm run build`: passed; Next.js compiled and finalized route optimization.
+- Existing non-fatal Turbopack NFT tracing warning remains documented and outside this policy-only scope.
+- Implementation commit: `58424d3` (`chore: enforce PR-first development workflow`).
+
 ## Decision log
 
 - 2026-08-19: PR-first is mandatory for all future repository updates, not only application features.
@@ -132,11 +141,11 @@ Rollback is reverting this documentation-only change. It has no runtime or datab
 
 ## Completion checklist
 
-- [ ] Design reviewed
-- [ ] PR template added
-- [ ] Workflow policy updated
-- [ ] README policy updated
-- [ ] Validation passed
+- [x] Design reviewed
+- [x] PR template added
+- [x] Workflow policy updated
+- [x] README policy updated
+- [x] Validation passed
 - [ ] Policy branch pushed
 - [ ] PR opened and verified
 - [ ] Merge intentionally left to human approval
