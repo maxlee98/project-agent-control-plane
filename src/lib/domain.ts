@@ -33,6 +33,7 @@ export interface Project {
   defaultBranch: string;
   githubProjectId: string | null;
   githubProjectUrl: string | null;
+  isDemo: boolean;
   status: "connected" | "syncing" | "attention";
   lastSyncedAt: string;
   activeAgents: number;
@@ -74,6 +75,7 @@ export interface AgentRun {
   finishedAt: string | null;
   error: string | null;
   executionMode: ExecutionMode;
+  isActive: boolean;
   commitSha: string | null;
   changedFiles: string[];
   checks: RunCheck[];

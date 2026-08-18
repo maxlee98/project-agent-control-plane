@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test tests/redaction.test.ts"
+    "test": "node --experimental-strip-types --experimental-loader ./tests/extensionless-loader.mjs --test tests/*.test.ts"
   },
   "dependencies": {
     "@cline/sdk": "latest",

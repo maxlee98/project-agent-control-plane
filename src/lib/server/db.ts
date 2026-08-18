@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
+import { normalizeLocalPath } from "./paths";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -29,6 +30,7 @@ function createDatabase() {
       default_branch TEXT NOT NULL DEFAULT 'main',
       github_project_id TEXT,
       github_project_url TEXT,
+      is_demo INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'connected',
       last_synced_at TEXT NOT NULL
     );
@@ -101,7 +103,11 @@ function createDatabase() {
   if (!existingColumns.has("changed_files_json")) database.exec("ALTER TABLE runs ADD COLUMN changed_files_json TEXT NOT NULL DEFAULT '[]'");
   if (!existingColumns.has("checks_json")) database.exec("ALTER TABLE runs ADD COLUMN checks_json TEXT NOT NULL DEFAULT '[]'");
 
+  const projectColumns = database.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>;
+  if (!new Set(projectColumns.map((column) => column.name)).has("is_demo")) database.exec("ALTER TABLE projects ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0");
+
   seedDatabase(database);
+  reconcileProjects(database);
   return database;
 }
 
@@ -112,8 +118,8 @@ function seedDatabase(database: Database.Database) {
   const now = new Date();
   const minutesAgo = (minutes: number) => new Date(now.getTime() - minutes * 60000).toISOString();
   const projectInsert = database.prepare(`
-    INSERT OR IGNORE INTO projects (id, name, full_name, description, initials, accent, local_path, default_branch, github_project_id, github_project_url, status, last_synced_at)
-    VALUES (@id, @name, @fullName, @description, @initials, @accent, @localPath, @defaultBranch, @githubProjectId, @githubProjectUrl, @status, @lastSyncedAt)
+    INSERT OR IGNORE INTO projects (id, name, full_name, description, initials, accent, local_path, default_branch, github_project_id, github_project_url, is_demo, status, last_synced_at)
+    VALUES (@id, @name, @fullName, @description, @initials, @accent, @localPath, @defaultBranch, @githubProjectId, @githubProjectUrl, @isDemo, @status, @lastSyncedAt)
   `);
   const taskInsert = database.prepare(`
     INSERT OR IGNORE INTO tasks (id, project_id, issue_number, title, description, status, priority, labels_json, assignee, agent_state, current_summary, branch_name, pr_url, github_url, updated_at, created_at)
@@ -131,6 +137,7 @@ function seedDatabase(database: Database.Database) {
     defaultBranch: "main",
     githubProjectId: "PVT_kwDOB-demo",
     githubProjectUrl: "https://github.com/users/maxlee/projects/1",
+    isDemo: 1,
     status: "connected",
     lastSyncedAt: minutesAgo(2),
   });
@@ -145,6 +152,7 @@ function seedDatabase(database: Database.Database) {
     defaultBranch: "main",
     githubProjectId: "PVT_kwDOB-demo-2",
     githubProjectUrl: "https://github.com/users/maxlee/projects/2",
+    isDemo: 1,
     status: "connected",
     lastSyncedAt: minutesAgo(11),
   });
@@ -156,12 +164,12 @@ function seedDatabase(database: Database.Database) {
       issueNumber: 12,
       title: "Make the overview surface recent agent activity",
       description: "Aggregate the last meaningful checkpoint from every repository into one glanceable feed.",
-      status: "in_progress",
+      status: "ready",
       priority: 1,
       labels: ["product", "observability"],
       assignee: "Agent",
-      agentState: "running",
-      currentSummary: "Designing the activity projection and shaping the first checkpoint payload.",
+      agentState: "idle",
+      currentSummary: "Demo sample only. Start a task to create a real agent run.",
       branchName: "agent/12-live-overview",
       prUrl: null,
       githubUrl: "https://github.com/maxlee/project-agent-control-plane/issues/12",
@@ -269,7 +277,7 @@ function seedDatabase(database: Database.Database) {
 
   database.prepare(`
     INSERT OR IGNORE INTO runs (id, task_id, project_id, mode, status, session_id, branch_name, workspace_path, progress, current_activity, started_at)
-    VALUES ('run-seed-live-overview', 'task-live-overview', 'project-control-plane', 'start', 'running', 'cline-demo-seed', 'agent/12-live-overview', 'project-control-plane/worktrees/task-live-overview', 46, 'Designing the activity projection and shaping the first checkpoint payload.', ?)
+    VALUES ('run-seed-live-overview', 'task-live-overview', 'project-control-plane', 'start', 'completed', NULL, 'agent/12-live-overview', 'project-control-plane/worktrees/task-live-overview', 100, 'Demo sample completed — no agent session was started.', ?)
   `).run(minutesAgo(3));
   database.prepare(`
     INSERT OR IGNORE INTO run_events (id, run_id, type, message, detail, created_at)
@@ -313,6 +321,34 @@ function seedDatabase(database: Database.Database) {
     tone: "green",
     createdAt: minutesAgo(76),
   });
+}
+
+function reconcileProjects(database: Database.Database) {
+  const reconcile = database.transaction(() => {
+    database.prepare("UPDATE projects SET is_demo = 1 WHERE id IN ('project-control-plane', 'project-job-hopper')").run();
+    database.prepare("UPDATE tasks SET status = 'ready', agent_state = 'idle', current_summary = 'Demo sample only. Start a task to create a real agent run.' WHERE id = 'task-live-overview'").run();
+    database.prepare("UPDATE runs SET status = 'completed', session_id = NULL, progress = 100, current_activity = 'Demo sample completed — no agent session was started.', finished_at = COALESCE(finished_at, ?) WHERE id = 'run-seed-live-overview'").run(new Date().toISOString());
+    const rows = database.prepare("SELECT id, local_path, is_demo FROM projects ORDER BY id").all() as Array<{ id: string; local_path: string; is_demo: number }>;
+    const groups = new Map<string, Array<{ id: string; is_demo: number }>>();
+    for (const row of rows) {
+      const key = normalizeLocalPath(row.local_path);
+      const group = groups.get(key) ?? [];
+      group.push({ id: row.id, is_demo: Number(row.is_demo) });
+      groups.set(key, group);
+    }
+    for (const group of groups.values()) {
+      if (group.length < 2) continue;
+      const canonical = group.find((row) => row.is_demo === 0) ?? group[0];
+      for (const duplicate of group) {
+        if (duplicate.id === canonical.id) continue;
+        database.prepare("UPDATE tasks SET project_id = ? WHERE project_id = ?").run(canonical.id, duplicate.id);
+        database.prepare("UPDATE runs SET project_id = ? WHERE project_id = ?").run(canonical.id, duplicate.id);
+        database.prepare("UPDATE activity SET project_id = ? WHERE project_id = ?").run(canonical.id, duplicate.id);
+        database.prepare("DELETE FROM projects WHERE id = ?").run(duplicate.id);
+      }
+    }
+  });
+  reconcile();
 }
 
 export const db = globalThis.controlPlaneDb ?? createDatabase();

@@ -9,6 +9,10 @@ export interface ClineCallbacks {
 
 const activeSessions = new Map<string, { cline: ClineCore; sessionId: string }>();
 
+export function hasActiveClineSession(runId: string) {
+  return activeSessions.has(runId);
+}
+
 function durationFromEnv(name: string, fallbackMinutes: number) {
   const value = Number(process.env[name]);
   return Number.isFinite(value) && value > 0 ? value * 60_000 : fallbackMinutes * 60_000;

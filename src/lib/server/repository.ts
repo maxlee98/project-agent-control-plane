@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { db } from "./db";
 import { redactSecrets } from "./redaction";
+import { normalizeLocalPath } from "./paths";
+import { hasActiveClineSession } from "./cline";
 import type { ActivityItem, AgentRun, DashboardData, Project, RunCheck, RunEvent, Task, TaskStatus } from "../domain";
 
 type ProjectRow = Record<string, unknown>;
@@ -30,6 +32,7 @@ export function mapProject(row: ProjectRow): Project {
     defaultBranch: String(row.default_branch),
     githubProjectId: row.github_project_id ? String(row.github_project_id) : null,
     githubProjectUrl: row.github_project_url ? String(row.github_project_url) : null,
+    isDemo: Number(row.is_demo) === 1,
     status: row.status as Project["status"],
     lastSyncedAt: String(row.last_synced_at),
     activeAgents: Number(row.active_agents ?? 0),
@@ -60,12 +63,14 @@ export function mapTask(row: TaskRow): Task {
 }
 
 export function mapRun(row: RunRow): AgentRun {
+  const status = row.status as AgentRun["status"];
+  const executionMode = row.execution_mode === "live" ? "live" : "demo";
   return {
     id: String(row.id),
     taskId: String(row.task_id),
     projectId: String(row.project_id),
     mode: row.mode as AgentRun["mode"],
-    status: row.status as AgentRun["status"],
+    status,
     sessionId: row.session_id ? String(row.session_id) : null,
     branchName: row.branch_name ? String(row.branch_name) : null,
     workspacePath: row.workspace_path ? String(row.workspace_path) : null,
@@ -74,7 +79,8 @@ export function mapRun(row: RunRow): AgentRun {
     startedAt: String(row.started_at),
     finishedAt: row.finished_at ? String(row.finished_at) : null,
     error: row.error ? String(row.error) : null,
-    executionMode: (row.execution_mode === "live" ? "live" : "demo"),
+    executionMode,
+    isActive: executionMode === "live" && (status === "queued" || status === "running") && hasActiveClineSession(String(row.id)),
     commitSha: row.commit_sha ? String(row.commit_sha) : null,
     changedFiles: fromJson(row.changed_files_json),
     checks: fromJson(row.checks_json) as unknown as RunCheck[],
@@ -96,18 +102,28 @@ export function mapActivity(row: ActivityRow): ActivityItem {
 }
 
 export function getDashboard(): DashboardData {
-  const projects = db.prepare(`
-    SELECT p.*, COUNT(DISTINCT CASE WHEN t.status NOT IN ('done') THEN t.id END) AS open_tasks,
-      COUNT(DISTINCT CASE WHEN t.pr_url IS NOT NULL AND t.status != 'done' THEN t.id END) AS open_prs,
-      COUNT(DISTINCT CASE WHEN t.agent_state = 'running' THEN t.id END) AS active_agents
-    FROM projects p LEFT JOIN tasks t ON t.project_id = p.id
-    GROUP BY p.id ORDER BY p.name
-  `).all().map((row) => mapProject(row as ProjectRow));
-  const tasks = db.prepare("SELECT * FROM tasks ORDER BY updated_at DESC").all().map((row) => mapTask(row as TaskRow));
-  const runs = db.prepare("SELECT * FROM runs ORDER BY started_at DESC LIMIT 40").all().map((row) => mapRun(row as RunRow));
-  const activity = db.prepare("SELECT * FROM activity ORDER BY created_at DESC LIMIT 40").all().map((row) => mapActivity(row as ActivityRow));
-  const runEvents = getRunEvents();
   const executionMode = process.env.EXECUTION_MODE === "live" ? "live" : "demo";
+  const projectRows = db.prepare(`
+    SELECT p.*, COUNT(DISTINCT CASE WHEN t.status NOT IN ('done') THEN t.id END) AS open_tasks,
+      COUNT(DISTINCT CASE WHEN t.pr_url IS NOT NULL AND t.status != 'done' THEN t.id END) AS open_prs
+    FROM projects p
+    LEFT JOIN tasks t ON t.project_id = p.id
+    WHERE (? = 'demo' OR p.is_demo = 0)
+    GROUP BY p.id ORDER BY p.name
+  `).all(executionMode);
+  const tasks = db.prepare("SELECT t.* FROM tasks t JOIN projects p ON p.id = t.project_id WHERE (? = 'demo' OR p.is_demo = 0) ORDER BY t.updated_at DESC").all(executionMode).map((row) => mapTask(row as TaskRow));
+  const runs = db.prepare("SELECT r.* FROM runs r JOIN projects p ON p.id = r.project_id WHERE (? = 'demo' OR p.is_demo = 0) ORDER BY r.started_at DESC LIMIT 40").all(executionMode).map((row) => mapRun(row as RunRow));
+  const activeLiveRuns = runs.filter((run) => run.isActive);
+  const activeCounts = new Map<string, number>();
+  for (const run of activeLiveRuns) activeCounts.set(run.projectId, (activeCounts.get(run.projectId) ?? 0) + 1);
+  const projects = projectRows.map((row) => {
+    const project = mapProject(row as ProjectRow);
+    project.activeAgents = activeCounts.get(project.id) ?? 0;
+    return project;
+  });
+  const activity = db.prepare("SELECT a.* FROM activity a JOIN projects p ON p.id = a.project_id WHERE (? = 'demo' OR p.is_demo = 0) ORDER BY a.created_at DESC LIMIT 40").all(executionMode).map((row) => mapActivity(row as ActivityRow));
+  const visibleRunIds = new Set(runs.map((run) => run.id));
+  const runEvents = getRunEvents().filter((event) => visibleRunIds.has(event.runId));
   const liveReady = Boolean(process.env.CLINE_API_KEY && process.env.GITHUB_TOKEN);
   return {
     projects,
@@ -143,14 +159,27 @@ export function getProject(projectId: string) {
 }
 
 export function createProject(input: { fullName: string; localPath: string; description?: string; githubProjectId?: string }) {
-  const now = isoNow();
+  const normalizedPath = normalizeLocalPath(input.localPath);
   const [owner, repo] = input.fullName.split("/");
-  const name = repo || input.fullName;
+  const projectName = repo || input.fullName;
+  const displayName = projectName.replace(/[-_]/g, " ");
+  const initials = projectName.slice(0, 2).toUpperCase();
+  const existingRow = db.prepare("SELECT * FROM projects WHERE full_name = ?").get(input.fullName) as ProjectRow | undefined
+    ?? (db.prepare("SELECT * FROM projects").all() as ProjectRow[]).find((row) => normalizeLocalPath(String(row.local_path)) === normalizedPath);
+  if (existingRow) {
+    if (Number(existingRow.is_demo)) {
+      db.prepare("UPDATE projects SET name = ?, full_name = ?, description = ?, initials = ?, local_path = ?, github_project_id = ?, is_demo = 0, status = 'attention', last_synced_at = ? WHERE id = ?")
+        .run(displayName, input.fullName, input.description ?? String(existingRow.description ?? ""), initials, input.localPath, input.githubProjectId?.trim() || String(existingRow.github_project_id ?? "") || null, isoNow(), existingRow.id);
+    }
+    return mapProject(db.prepare("SELECT * FROM projects WHERE id = ?").get(existingRow.id) as ProjectRow);
+  }
+  const now = isoNow();
+  const name = projectName;
   const id = `project-${randomUUID()}`;
   db.prepare(`
     INSERT INTO projects (id, name, full_name, description, initials, accent, local_path, default_branch, github_project_id, status, last_synced_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, 'main', ?, 'attention', ?)
-  `).run(id, name.replace(/[-_]/g, " "), input.fullName, input.description ?? `Managed workspace for ${owner ?? "your"}/${name}.`, name.slice(0, 2).toUpperCase(), "#ff9d66", input.localPath, input.githubProjectId?.trim() || null, now);
+  `).run(id, name, input.fullName, input.description ?? `Managed workspace for ${owner ?? "your"}/${name}.`, initials, "#ff9d66", input.localPath, input.githubProjectId?.trim() || null, now);
   addActivity({ projectId: id, type: "project", title: "Repository added", detail: `${input.fullName} is ready to connect to GitHub Projects.`, tone: "cyan" });
   return mapProject(db.prepare("SELECT * FROM projects WHERE id = ?").get(id) as ProjectRow);
 }
