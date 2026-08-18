@@ -103,6 +103,18 @@ managed repository can optionally contain a `WORKFLOW.md` with its own coding co
 validation commands, branch rules, and handoff expectations. A starter contract lives at
 `workflows/default/WORKFLOW.md`.
 
+## Pull-request-first development
+
+Every repository update—features, bug fixes, refactors, tests, documentation, configuration, and
+migrations—must be developed on a dedicated branch and delivered through a pull request. Do not
+commit or push directly to `main`. Before the first edit, inspect the current branch and create a
+task-scoped branch when needed.
+
+Every PR must use `.github/pull_request_template.md`, link the control-plane task and its LLD, and
+describe the problem, goals, design, affected boundaries, validation results, security review,
+risks, and follow-ups. Verify local checks and remote branch/PR state before reporting handoff.
+Merging remains a human decision; agents must not merge automatically.
+
 ## Current implementation status
 
 ### Working now
