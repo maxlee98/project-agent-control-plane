@@ -213,6 +213,24 @@ export function updateTask(taskId: string, input: { status?: TaskStatus; priorit
   return getTask(taskId);
 }
 
+export function completeTaskByHuman(taskId: string, summary?: string) {
+  const task = getTask(taskId);
+  if (!task) return null;
+  const completionSummary = summary?.trim() || "Marked done by a human after independent verification.";
+  const now = isoNow();
+  const complete = db.transaction(() => {
+    db.prepare("UPDATE tasks SET status = 'done', agent_state = 'idle', current_summary = ?, updated_at = ? WHERE id = ?")
+      .run(completionSummary, now, taskId);
+    const existingActivity = db.prepare("SELECT id FROM activity WHERE task_id = ? AND type = 'human_completion' LIMIT 1").get(taskId);
+    if (!existingActivity) {
+      db.prepare("INSERT INTO activity (id, project_id, task_id, run_id, type, title, detail, tone, created_at) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)")
+        .run(`activity-${randomUUID()}`, task.projectId, taskId, "human_completion", "Task marked complete by human", "The task was marked Done manually; prior agent run history was preserved.", "green", now);
+    }
+  });
+  complete();
+  return getTask(taskId);
+}
+
 export function addTaskComment(taskId: string, comment: string) {
   const task = getTask(taskId);
   if (!task) return null;
