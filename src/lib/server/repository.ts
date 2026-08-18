@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { db } from "./db";
+import { redactSecrets } from "./redaction";
 import type { ActivityItem, AgentRun, DashboardData, Project, RunCheck, RunEvent, Task, TaskStatus } from "../domain";
 
 type ProjectRow = Record<string, unknown>;
@@ -195,7 +196,7 @@ export function addTaskComment(taskId: string, comment: string) {
 export function addActivity(input: { projectId: string; taskId?: string | null; runId?: string | null; type: string; title: string; detail?: string | null; tone: ActivityItem["tone"] }) {
   const createdAt = isoNow();
   db.prepare(`INSERT INTO activity (id, project_id, task_id, run_id, type, title, detail, tone, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(`activity-${randomUUID()}`, input.projectId, input.taskId ?? null, input.runId ?? null, input.type, input.title, input.detail ?? null, input.tone, createdAt);
+    .run(`activity-${randomUUID()}`, input.projectId, input.taskId ?? null, input.runId ?? null, input.type, redactSecrets(input.title), redactSecrets(input.detail), input.tone, createdAt);
 }
 
 export function touchProject(projectId: string) {
@@ -229,7 +230,7 @@ export function updateRun(runId: string, input: Partial<Pick<AgentRun, "status" 
 }
 
 export function addRunEvent(runId: string, type: string, message: string, detail?: string | null) {
-  const event = { id: `event-${randomUUID()}`, runId, type, message, detail: detail ?? null, createdAt: isoNow() };
+  const event = { id: `event-${randomUUID()}`, runId, type, message: redactSecrets(message) ?? "", detail: redactSecrets(detail), createdAt: isoNow() };
   db.prepare("INSERT INTO run_events (id, run_id, type, message, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(event.id, event.runId, event.type, event.message, event.detail, event.createdAt);
   return event;
 }
