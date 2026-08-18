@@ -85,6 +85,10 @@ export async function detectChecks(workspacePath: string): Promise<RunCheck[]> {
 
 export async function runChecks(workspacePath: string, checks: RunCheck[], onUpdate: (checks: RunCheck[]) => void) {
   const results = [...checks];
+  const validationEnvironment: Record<string, string | undefined> = { ...process.env };
+  // The Next dev server sets NODE_ENV=development in this process. Do not leak it into
+  // production builds executed inside an agent worktree; CI runs with it unset too.
+  delete validationEnvironment.NODE_ENV;
   for (let index = 0; index < results.length; index += 1) {
     const check = results[index];
     results[index] = { ...check, status: "running" };
@@ -92,7 +96,7 @@ export async function runChecks(workspacePath: string, checks: RunCheck[], onUpd
     const started = Date.now();
     try {
       const [command, ...args] = check.command.split(" ");
-      const result = await execFile(command, args, { cwd: workspacePath, timeout: 10 * 60_000, maxBuffer: 4 * 1024 * 1024 });
+      const result = await execFile(command, args, { cwd: workspacePath, env: validationEnvironment as NodeJS.ProcessEnv, timeout: 10 * 60_000, maxBuffer: 4 * 1024 * 1024 });
       results[index] = { ...check, status: "passed", output: `${result.stdout}${result.stderr}`.slice(-4000), durationMs: Date.now() - started };
     } catch (error) {
       const detail = error as { stdout?: string; stderr?: string; message?: string };
