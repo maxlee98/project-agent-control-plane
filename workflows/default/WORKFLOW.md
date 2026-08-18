@@ -29,6 +29,24 @@ You are working on a task selected by the Project Agent Control Plane.
 - Never put credentials, tokens, or full environment files into logs or comments.
 - If a decision is ambiguous, leave a concise checkpoint and continue with the safest reversible interpretation.
 
+## Run-event and GitHub checkpoint contract
+
+The dashboard consumes the control plane's stable run-event vocabulary, not ClineCore event names.
+Agent/tool chatter and streaming output are retained locally for diagnostics and must not be copied
+into GitHub comments. The control plane should publish a concise, redacted GitHub checkpoint only
+for:
+
+- validation passed or failed;
+- a run failure, including the safe recovery/worktree-preservation summary;
+- an operator stop when a recovery decision is needed; and
+- the final pull-request handoff.
+
+Session start, progress notices, tool start/finish, output summaries, output chunks, and unknown
+agent updates are local run events only. Checkpoint text must contain the meaningful outcome, avoid
+credentials and raw provider output, and never include session IDs or authorization data. The final
+PR handoff remains the primary human review checkpoint; do not duplicate it with a second generic
+completion comment.
+
 ## Handoff
 
 When the work is ready:

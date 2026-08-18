@@ -14,6 +14,78 @@ export type RunStatus = "queued" | "running" | "completed" | "failed" | "stopped
 export type ExecutionMode = "demo" | "live";
 export type ActivityTone = "cyan" | "amber" | "violet" | "rose" | "red" | "green" | "slate";
 
+/** Stable vocabulary exposed by the control plane, not by an agent implementation. */
+export type RunEventType =
+  | "run_started"
+  | "dispatch"
+  | "workspace_ready"
+  | "workspace_created"
+  | "workspace_reused"
+  | "session_started"
+  | "progress"
+  | "tool_started"
+  | "tool_finished"
+  | "output_summary"
+  | "output_chunk"
+  | "validation_started"
+  | "validation_passed"
+  | "validation_failed"
+  | "run_completed"
+  | "run_failed"
+  | "run_stopped"
+  | "handoff_complete"
+  | "checkpoint"
+  | "checkpoint_publish_failed"
+  | "unknown";
+
+export interface RunEventDraft {
+  type: RunEventType;
+  message: string;
+  detail: string | null;
+  /** Whether the orchestrator should make this event a concise GitHub checkpoint. */
+  checkpoint: boolean;
+}
+
+const RUN_EVENT_TYPES = new Set<RunEventType>([
+  "run_started",
+  "dispatch",
+  "workspace_ready",
+  "workspace_created",
+  "workspace_reused",
+  "session_started",
+  "progress",
+  "tool_started",
+  "tool_finished",
+  "output_summary",
+  "output_chunk",
+  "validation_started",
+  "validation_passed",
+  "validation_failed",
+  "run_completed",
+  "run_failed",
+  "run_stopped",
+  "handoff_complete",
+  "checkpoint",
+  "checkpoint_publish_failed",
+  "unknown",
+]);
+
+export function normalizeRunEventType(value: unknown): RunEventType {
+  return typeof value === "string" && RUN_EVENT_TYPES.has(value as RunEventType) ? value as RunEventType : "unknown";
+}
+
+const GITHUB_CHECKPOINT_EVENT_TYPES = new Set<RunEventType>([
+  "validation_passed",
+  "validation_failed",
+  "run_failed",
+  "run_stopped",
+  "handoff_complete",
+]);
+
+export function shouldPublishGithubCheckpoint(type: RunEventType) {
+  return GITHUB_CHECKPOINT_EVENT_TYPES.has(type);
+}
+
 export interface RunCheck {
   name: string;
   command: string;
@@ -96,7 +168,7 @@ export interface ActivityItem {
 export interface RunEvent {
   id: string;
   runId: string;
-  type: string;
+  type: RunEventType;
   message: string;
   detail: string | null;
   createdAt: string;
