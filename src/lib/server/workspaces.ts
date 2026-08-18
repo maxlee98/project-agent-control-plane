@@ -23,31 +23,41 @@ export interface WorkspaceHandle {
   repositoryPath: string;
   workspacePath: string;
   branchName: string;
+  reused: boolean;
 }
 
-export async function prepareWorkspace(project: Project, task: Task): Promise<WorkspaceHandle> {
+export async function prepareWorkspace(project: Project, task: Task, options: { runId: string; mode: "start" | "continue" | "retry"; continuationWorkspacePath?: string | null }): Promise<WorkspaceHandle> {
   const repositoryPath = path.resolve(expandHome(project.localPath));
   const root = path.resolve(expandHome(process.env.WORKSPACE_ROOT ?? path.join(os.homedir(), ".project-agent-control-plane", "workspaces")));
   await fs.mkdir(root, { recursive: true });
   const rootForProject = path.join(root, safeName(project.fullName));
-  const workspacePath = path.join(rootForProject, safeName(task.id));
-  const branchName = task.branchName ?? `agent/${task.issueNumber ?? task.id}-${safeName(task.title).slice(0, 42)}`;
 
   const repositoryCheck = await git(repositoryPath, ["rev-parse", "--show-toplevel"]);
   if (path.resolve(repositoryCheck.stdout.trim()) !== repositoryPath) throw new Error(`Configured checkout is not the expected Git repository: ${repositoryPath}`);
 
   const worktrees = await git(repositoryPath, ["worktree", "list", "--porcelain"]);
-  if (!worktrees.stdout.includes(`worktree ${workspacePath}`)) {
-    await fs.mkdir(rootForProject, { recursive: true });
-    try {
-      await git(repositoryPath, ["worktree", "add", "-b", branchName, workspacePath, `origin/${project.defaultBranch}`], 60_000);
-    } catch {
-      // A retry or a previously interrupted run may have already created the branch.
-      try { await git(repositoryPath, ["worktree", "add", workspacePath, branchName], 60_000); }
-      catch { await git(repositoryPath, ["worktree", "add", "-b", branchName, workspacePath, project.defaultBranch], 60_000); }
+  if (options.mode === "continue") {
+    const workspacePath = options.continuationWorkspacePath ? path.resolve(options.continuationWorkspacePath) : "";
+    if (!workspacePath || !worktrees.stdout.includes(`worktree ${workspacePath}`)) {
+      throw new Error("Continuation workspace is unavailable. Start a retry to create a fresh workspace from the current default branch.");
     }
+    const currentBranch = (await git(workspacePath, ["branch", "--show-current"])).stdout.trim();
+    return { repositoryPath, workspacePath, branchName: currentBranch || task.branchName || "unknown", reused: true };
   }
-  return { repositoryPath, workspacePath, branchName };
+
+  const workspacePath = path.join(rootForProject, safeName(task.id), safeName(options.runId));
+  const branchName = `agent/${task.issueNumber ?? task.id}-${safeName(task.title).slice(0, 34)}-${safeName(options.runId).slice(-8)}`;
+  if (worktrees.stdout.includes(`worktree ${workspacePath}`)) throw new Error(`Fresh run workspace already exists: ${workspacePath}`);
+  try {
+    await fs.access(workspacePath);
+    throw new Error(`Fresh run workspace path already exists outside Git worktree tracking: ${workspacePath}`);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Fresh run workspace path already exists")) throw error;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  await fs.mkdir(path.dirname(workspacePath), { recursive: true });
+  await git(repositoryPath, ["worktree", "add", "-b", branchName, workspacePath, `origin/${project.defaultBranch}`], 60_000);
+  return { repositoryPath, workspacePath, branchName, reused: false };
 }
 
 export async function collectChangedFiles(workspacePath: string) {

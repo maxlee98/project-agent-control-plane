@@ -1,6 +1,7 @@
 # Terminal reliability protocol
 
 This project follows the global `terminal-reliability` skill in `~/.agents/skills/terminal-reliability/SKILL.md`.
+For Live-mode operations, also follow `.agents/skills/control-plane-live-ops/SKILL.md`.
 
 The purpose is to keep agent work recoverable when a shell command, dev server, package install, or
 remote GitHub request is interrupted.
@@ -14,6 +15,8 @@ remote GitHub request is interrupted.
 - Never print `.env.local`; it contains provider and GitHub credentials.
 - Keep SQLite resets scoped to `.data/` and ask before deleting it.
 - Verify branch, commit SHA, PR number/URL, and run status after side effects.
+- Use run-scoped workspaces for starts/retries; only explicit continuation may reuse a recorded worktree.
+- Treat missing agent output as unknown and recover by querying persisted state instead of rerunning blindly.
 
 ## Recovery commands
 

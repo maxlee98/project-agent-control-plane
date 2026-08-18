@@ -38,7 +38,7 @@ async function buildPrompt(projectPath: string, task: ReturnType<typeof getTask>
   return `${workflow}\n\n## Assigned task\nTitle: ${task.title}\n\nDescription:\n${task.description || "No description provided."}\n\nLatest context:\n${task.currentSummary}\n\nWork in the assigned isolated workspace. Make the change, validate it, and leave a concise handoff.`;
 }
 
-async function executeLiveRun(runId: string, taskId: string) {
+async function executeLiveRun(runId: string, taskId: string, sourceRunId?: string) {
   const task = getTask(taskId);
   const project = task ? getProject(task.projectId) : null;
   if (!task || !project) throw new Error("Project or task disappeared before live dispatch.");
@@ -46,10 +46,13 @@ async function executeLiveRun(runId: string, taskId: string) {
   try {
     updateRun(runId, { status: "running", progress: 4, currentActivity: "Validating the local checkout" });
     addRunEvent(runId, "dispatch", "Live run dispatched", "Preparing an isolated Git worktree.");
-    workspace = await prepareWorkspace(project, task);
-    updateRun(runId, { progress: 12, branchName: workspace.branchName, workspacePath: workspace.workspacePath, currentActivity: "Isolated worktree ready" });
+    const run = getRun(runId);
+    const sourceRun = sourceRunId ? getRun(sourceRunId) : null;
+    if (!run) throw new Error("Live run disappeared before workspace preparation.");
+    workspace = await prepareWorkspace(project, task, { runId, mode: run.mode, continuationWorkspacePath: sourceRun?.workspacePath });
+    updateRun(runId, { progress: 12, branchName: workspace.branchName, workspacePath: workspace.workspacePath, currentActivity: workspace.reused ? "Existing worktree resumed" : "Fresh isolated worktree ready" });
     updateTask(task.id, { branchName: workspace.branchName, summary: "Cline is working inside an isolated worktree." });
-    addRunEvent(runId, "workspace_ready", "Isolated worktree ready", workspace.workspacePath);
+    addRunEvent(runId, workspace.reused ? "workspace_reused" : "workspace_created", workspace.reused ? "Existing isolated worktree resumed" : "Fresh isolated worktree created", workspace.workspacePath);
     const prompt = await buildPrompt(expandHome(project.localPath), task);
     const result = await runCline({ runId, task, project, prompt, workspacePath: workspace.workspacePath }, {
       onActivity: (message, detail) => { updateRun(runId, { progress: Math.min(68, 15 + Math.floor(Math.random() * 30)), currentActivity: message }); addRunEvent(runId, "cline", message, detail); },
@@ -63,9 +66,9 @@ async function executeLiveRun(runId: string, taskId: string) {
     updateRun(runId, { progress: 88, currentActivity: "Committing and pushing the task branch" });
     const handoff = await commitAndPush(workspace, task.title);
     updateRun(runId, { commitSha: handoff.sha, changedFiles: handoff.changedFiles, progress: 94, currentActivity: "Creating the GitHub pull request" });
-    const run = getRun(runId);
-    if (!run) throw new Error("Live run disappeared before GitHub handoff.");
-    const pr = await createPullRequest(project.fullName, task, { ...run, commitSha: handoff.sha, branchName: workspace.branchName });
+    const handoffRun = getRun(runId);
+    if (!handoffRun) throw new Error("Live run disappeared before GitHub handoff.");
+    const pr = await createPullRequest(project.fullName, task, { ...handoffRun, commitSha: handoff.sha, branchName: workspace.branchName });
     updateTask(task.id, { status: "agent_review", agentState: "succeeded", branchName: workspace.branchName, prUrl: pr.url, summary: `Live run completed. ${handoff.changedFiles.length} files changed; PR #${pr.number} is ready for review.` });
     updateRun(runId, { status: "completed", progress: 100, currentActivity: "Pull request ready for review", finishedAt: new Date().toISOString() });
     addRunEvent(runId, "handoff_complete", "Pull request created", pr.url);
@@ -112,7 +115,7 @@ function schedule(runId: string, taskId: string, mode: AgentRun["mode"]) {
   activeRuns.set(runId, timers);
 }
 
-export function startAgentRun(taskId: string, mode: AgentRun["mode"] = "start") {
+export function startAgentRun(taskId: string, mode: AgentRun["mode"] = "start", sourceRunId?: string) {
   const task = getTask(taskId);
   if (!task) return null;
   if (task.agentState === "running") return { error: "This task already has an active run." } as const;
@@ -122,7 +125,7 @@ export function startAgentRun(taskId: string, mode: AgentRun["mode"] = "start") 
   }
   const run = createRun({ taskId, mode });
   if (!run) return null;
-  if (run.executionMode === "live") void executeLiveRun(run.id, taskId);
+  if (run.executionMode === "live") void executeLiveRun(run.id, taskId, sourceRunId);
   else schedule(run.id, taskId, mode);
   return run;
 }
