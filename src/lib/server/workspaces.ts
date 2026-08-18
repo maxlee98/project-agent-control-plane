@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { Project, RunCheck, Task } from "../domain";
+import { validationEnvironment } from "./validation";
 
 const execFile = promisify(execFileCallback);
 
@@ -23,6 +24,7 @@ export interface WorkspaceHandle {
   repositoryPath: string;
   workspacePath: string;
   branchName: string;
+  baseBranch: string;
   reused: boolean;
 }
 
@@ -42,7 +44,7 @@ export async function prepareWorkspace(project: Project, task: Task, options: { 
       throw new Error("Continuation workspace is unavailable. Start a retry to create a fresh workspace from the current default branch.");
     }
     const currentBranch = (await git(workspacePath, ["branch", "--show-current"])).stdout.trim();
-    return { repositoryPath, workspacePath, branchName: currentBranch || task.branchName || "unknown", reused: true };
+    return { repositoryPath, workspacePath, branchName: currentBranch || task.branchName || "unknown", baseBranch: project.defaultBranch, reused: true };
   }
 
   const workspacePath = path.join(rootForProject, safeName(task.id), safeName(options.runId));
@@ -57,12 +59,17 @@ export async function prepareWorkspace(project: Project, task: Task, options: { 
   }
   await fs.mkdir(path.dirname(workspacePath), { recursive: true });
   await git(repositoryPath, ["worktree", "add", "-b", branchName, workspacePath, `origin/${project.defaultBranch}`], 60_000);
-  return { repositoryPath, workspacePath, branchName, reused: false };
+  return { repositoryPath, workspacePath, branchName, baseBranch: project.defaultBranch, reused: false };
 }
 
 export async function collectChangedFiles(workspacePath: string) {
   const result = await git(workspacePath, ["status", "--short"]);
   return result.stdout.split("\n").filter(Boolean).map((line) => line.slice(3).trim()).filter(Boolean);
+}
+
+async function collectBranchChangedFiles(workspace: WorkspaceHandle) {
+  const result = await git(workspace.workspacePath, ["diff", "--name-only", `origin/${workspace.baseBranch}...HEAD`]);
+  return result.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
 }
 
 async function commandExists(workspacePath: string, command: string) {
@@ -85,10 +92,9 @@ export async function detectChecks(workspacePath: string): Promise<RunCheck[]> {
 
 export async function runChecks(workspacePath: string, checks: RunCheck[], onUpdate: (checks: RunCheck[]) => void) {
   const results = [...checks];
-  const validationEnvironment: Record<string, string | undefined> = { ...process.env };
-  // The Next dev server sets NODE_ENV=development in this process. Do not leak it into
-  // production builds executed inside an agent worktree; CI runs with it unset too.
-  delete validationEnvironment.NODE_ENV;
+  // The Next dev server sets NODE_ENV=development in this process. Force validation
+  // subprocesses into the same production mode used by the build and CI checks.
+  const childEnvironment = { ...validationEnvironment(), NODE_ENV: "production" as const };
   for (let index = 0; index < results.length; index += 1) {
     const check = results[index];
     results[index] = { ...check, status: "running" };
@@ -96,7 +102,7 @@ export async function runChecks(workspacePath: string, checks: RunCheck[], onUpd
     const started = Date.now();
     try {
       const [command, ...args] = check.command.split(" ");
-      const result = await execFile(command, args, { cwd: workspacePath, env: validationEnvironment as NodeJS.ProcessEnv, timeout: 10 * 60_000, maxBuffer: 4 * 1024 * 1024 });
+      const result = await execFile(command, args, { cwd: workspacePath, env: childEnvironment, timeout: 10 * 60_000, maxBuffer: 4 * 1024 * 1024 });
       results[index] = { ...check, status: "passed", output: `${result.stdout}${result.stderr}`.slice(-4000), durationMs: Date.now() - started };
     } catch (error) {
       const detail = error as { stdout?: string; stderr?: string; message?: string };
@@ -110,11 +116,17 @@ export async function runChecks(workspacePath: string, checks: RunCheck[], onUpd
 }
 
 export async function commitAndPush(workspace: WorkspaceHandle, title: string) {
-  const changedFiles = await collectChangedFiles(workspace.workspacePath);
-  if (!changedFiles.length) throw new Error("The agent completed without changing any files; no commit or PR was created.");
-  await git(workspace.workspacePath, ["add", "-A"]);
-  await git(workspace.workspacePath, ["commit", "-m", `agent: ${title}`], 60_000);
+  if (await commandExists(workspace.workspacePath, "next-env.d.ts")) {
+    try { await git(workspace.workspacePath, ["restore", "--worktree", "--", "next-env.d.ts"]); } catch { /* Generated file may not be tracked in every repository. */ }
+  }
+  const workingChangedFiles = await collectChangedFiles(workspace.workspacePath);
+  if (workingChangedFiles.length) {
+    await git(workspace.workspacePath, ["add", "-A"]);
+    await git(workspace.workspacePath, ["commit", "-m", `agent: ${title}`], 60_000);
+  }
   const sha = (await git(workspace.workspacePath, ["rev-parse", "HEAD"])).stdout.trim();
+  const changedFiles = Array.from(new Set(await collectBranchChangedFiles(workspace)));
+  if (!changedFiles.length) throw new Error("The agent completed without changing any files; no commit or PR was created.");
   await git(workspace.workspacePath, ["push", "--set-upstream", "origin", workspace.branchName], 120_000);
   return { sha, changedFiles };
 }
