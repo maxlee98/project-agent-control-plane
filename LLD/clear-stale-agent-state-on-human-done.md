@@ -140,6 +140,7 @@ remain valid because the transition is additive and does not delete history.
 - `git diff --check`: passed before commit.
 - The existing non-fatal Turbopack NFT tracing warning through `next.config.mjs` and `src/lib/server/db.ts` remains documented and outside this task’s scope.
 - The requested task was created and verified as `task-d86af9b1-d0bc-45af-b0d6-2858b37dc898`, P1, Ready, under the canonical project.
+- Implementation commit: `af74163bfed25c4b519f2962c9b74e0080512cb4` (`fix: normalize human task completion state`).
 
 ## Open questions and assumptions
 
