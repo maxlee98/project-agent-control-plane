@@ -2,7 +2,7 @@
 
 ## Status
 
-- **Status:** In progress
+- **Status:** Complete
 - **Owner:** Project Agent Control Plane
 - **Last updated:** 2026-08-19
 - **Related repository:** `maxlee98/project-agent-control-plane`
@@ -133,6 +133,7 @@ file should be backed up before applying it in a production deployment.
 - Live dashboard check: a bounded temporary server on port 3123 returned Live mode with no Demo fixtures visible in `/api/dashboard`.
 - Cleanup: port 3123 had no listener after the check; temporary database, response, log, and verification script were removed.
 - Known warning: Next/Turbopack reports one non-fatal NFT tracing warning through `next.config.mjs` and `src/lib/server/db.ts`; it is outside this task’s scope.
+- Implementation commit: `f029d34c8a71e853ea2a707586bf741e9d7fff3d` (`fix: make agent liveness and project registration truthful`).
 
 ## Completion checklist
 
@@ -142,4 +143,4 @@ file should be backed up before applying it in a production deployment.
 - [x] Update Demo/Live UI labels.
 - [x] Add regression tests.
 - [x] Validate Demo and Live dashboard behavior.
-- [ ] Update this LLD with final commit/PR and verification results.
+- [x] Update this LLD with final commit/PR and verification results.
