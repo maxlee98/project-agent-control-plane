@@ -126,12 +126,15 @@ Rollback is reverting this documentation-only change. It has no runtime or datab
 - `npm run build`: passed; Next.js compiled and finalized route optimization.
 - Existing non-fatal Turbopack NFT tracing warning remains documented and outside this policy-only scope.
 - Implementation commit: `58424d3` (`chore: enforce PR-first development workflow`).
+- Branch push: verified `origin/chore/pr-first-development-policy` exists.
+- Pull request: verified open at https://github.com/maxlee98/project-agent-control-plane/pull/11.
 
 ## Decision log
 
 - 2026-08-19: PR-first is mandatory for all future repository updates, not only application features.
 - 2026-08-19: The template requires exact validation evidence and LLD/task references to preserve context across agent handoffs.
 - 2026-08-19: Automatic merge remains prohibited; human review controls the final merge.
+- 2026-08-19: Policy branch `chore/pr-first-development-policy` was pushed and PR #11 was opened; merge remains intentionally pending human approval.
 
 ## Open questions and assumptions
 
@@ -146,6 +149,6 @@ Rollback is reverting this documentation-only change. It has no runtime or datab
 - [x] Workflow policy updated
 - [x] README policy updated
 - [x] Validation passed
-- [ ] Policy branch pushed
-- [ ] PR opened and verified
-- [ ] Merge intentionally left to human approval
+- [x] Policy branch pushed
+- [x] PR opened and verified
+- [x] Merge intentionally left to human approval
