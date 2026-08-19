@@ -59,7 +59,8 @@ to run.
 
 - Global skills: `~/.agents/skills/{terminal-reliability,scripted-edit-reliability,lld-driven-development}/SKILL.md`.
 - Repository agent contract: `AGENTS.md` and `workflows/default/WORKFLOW.md`.
-- Repository operations: `scripts/safe-run.mjs` and `scripts/install-terminal-hardening.mjs`.
+- Repository operations: `scripts/safe-run.mjs`, `scripts/install-terminal-hardening.mjs`, and
+  `scripts/verify-hard-stop.mjs`.
 - Regression tests: `tests/safe-run.test.ts`.
 - Local operational guidance: `docs/terminal-reliability.md`.
 
@@ -163,6 +164,8 @@ three global skills. No runtime/data rollback is needed.
 - Global readback — verified `ABSOLUTE TERMINAL HARD STOP` in all three canonical global skill files.
 - The runner tests verified pre-spawn rejection, unsafe script rejection, ignored stdin, timeout
   process-group termination, and output capping.
+- `npm run safe:run -- --timeout-ms 120000 -- node scripts/verify-hard-stop.mjs` — passed; all
+  global markers and repository hard-stop files were verified without printing their contents.
 
 ## Completion checklist
 
