@@ -2,6 +2,7 @@
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import { assertFreshComparison } from "./branch-freshness.mjs";
 import { assertValidPrBody, readTemplate } from "./pr-template.mjs";
 
 function argumentValue(args, name) {
@@ -17,7 +18,8 @@ function credentialHelperToken() {
 }
 
 const args = process.argv.slice(2);
-const title = argumentValue(args, "--title");
+const titleFile = argumentValue(args, "--title-file");
+const title = titleFile ? fs.readFileSync(titleFile, "utf8").trim() : argumentValue(args, "--title");
 const head = argumentValue(args, "--head");
 const base = argumentValue(args, "--base");
 const bodyFile = argumentValue(args, "--body-file");
@@ -25,7 +27,7 @@ const repository = process.env.GITHUB_REPOSITORY ?? "maxlee98/project-agent-cont
 const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? credentialHelperToken();
 
 if (!head || !base || !bodyFile) {
-  process.stderr.write("usage: create-pr [--title <title>] --head <branch> --base <branch> --body-file <path>\n");
+  process.stderr.write("usage: create-pr [--title <title> | --title-file <path>] --head <branch> --base <branch> --body-file <path>\n");
   process.exit(2);
 }
 if (!token) {
@@ -46,6 +48,9 @@ async function github(pathname, init = {}) {
 }
 
 const owner = repository.split("/")[0];
+const freshnessBase = process.env.PR_FRESHNESS_BASE ?? "main";
+const comparison = await github(`/compare/${encodeURIComponent(freshnessBase)}...${encodeURIComponent(head)}`);
+assertFreshComparison(comparison, freshnessBase, head);
 const existing = await github(`/pulls?state=open&head=${encodeURIComponent(`${owner}:${head}`)}&per_page=10`);
 if (Array.isArray(existing) && existing[0]) {
   const update = { body, base };

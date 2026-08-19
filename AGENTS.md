@@ -71,6 +71,20 @@ The CI workflow `validate-pr-template.yml` is the server-side gate. A PR with mi
 unresolved template comments, incomplete validation results, or incomplete security checks must fail
 the gate and must not be considered ready for human review.
 
+## Feature-branch freshness
+
+Before creating or updating any PR, the feature head MUST contain the current `main` history:
+
+1. Run `npm run safe:run -- --timeout-ms 30000 -- node scripts/verify-branch-freshness.mjs --base main --head <feature-branch>`.
+2. If it is behind or diverged, run `scripts/update-branch-from-main.mjs --strategy update` or
+   `--strategy rebase` from a clean feature worktree.
+3. Re-run the freshness verifier; only then validate the PR body and call `scripts/create-pr.mjs`.
+
+`scripts/create-pr.mjs` repeats this check before every remote PR write and refuses stale heads.
+The update strategy merges `origin/main`; the rebase strategy rewrites local history. Neither
+strategy force-pushes. A rebased published branch requires an explicit, separately reviewed
+`--force-with-lease` push on the feature branch.
+
 ## LLD and handoff
 
 Before changing code, read or create `LLD/<task-slug>.md`. On every context resumption, reread the

@@ -41,6 +41,16 @@ You are working on a task selected by the Project Agent Control Plane.
 - After the remote write, query and verify the PR number, URL, state, base, head, and body contract.
 - The CI template gate must pass before the task is moved to human review. Never merge automatically.
 
+## Feature-branch freshness
+
+- Before every PR create/update, verify `main...<feature>` with
+  `scripts/verify-branch-freshness.mjs`; `behind=0` and non-diverged status are mandatory.
+- If stale, use `scripts/update-branch-from-main.mjs --strategy update` to merge `origin/main`, or
+  `--strategy rebase` to rebase onto `origin/main`, then verify again.
+- Never force-push automatically after rebase; use an explicit, reviewed `--force-with-lease` push
+  only on the feature branch.
+- `scripts/create-pr.mjs` repeats the freshness gate and must refuse a stale head.
+
 ## Pull-request-first policy
 
 - Every feature, bug fix, refactor, test, documentation, configuration, and migration change must be developed on a dedicated branch and delivered through a pull request.
