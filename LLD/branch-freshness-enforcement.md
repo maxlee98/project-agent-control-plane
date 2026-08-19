@@ -2,7 +2,7 @@
 
 ## Status
 
-- **Status:** In progress
+- **Status:** Implemented; pending review
 - **Owner:** Project Agent Control Plane
 - **Date:** 2026-08-20
 - **Related task or issue:** Require every feature branch to be up to date with `main` before a PR is created or updated.
@@ -100,10 +100,21 @@ resolution or `git rebase --abort` only after inspecting state.
 
 ## Completion checklist
 
-- [ ] Design reviewed
-- [ ] Freshness verifier and create-pr gate implemented
-- [ ] Update/rebase helper implemented
-- [ ] Agent/workflow docs updated
-- [ ] Tests, typecheck, build, and diff checks passed
-- [ ] Template-compliant PR opened and verified
-- [ ] Human merge approval remains pending
+- [x] Design reviewed
+- [x] Freshness verifier and create-pr gate implemented
+- [x] Update/rebase helper implemented
+- [x] Agent/workflow docs updated
+- [x] Tests, typecheck, build, and diff checks passed
+- [x] Template-compliant PR opened and verified
+- [x] Human merge approval remains pending
+
+## Validation results
+
+- `npm run safe:run -- --timeout-ms 120000 -- npm test` — passed, 20 tests.
+- `npm run safe:run -- --timeout-ms 120000 -- npm run typecheck` — passed.
+- `npm run safe:run -- --timeout-ms 120000 -- npm run build` — passed with the existing non-fatal
+  Turbopack NFT tracing warning through `next.config.mjs` and `src/lib/server/db.ts`.
+- `npm run safe:run -- --timeout-ms 120000 -- git diff --check` — passed.
+- `npm run safe:run -- --timeout-ms 30000 -- node scripts/verify-branch-freshness.mjs --base main --head fix/branch-freshness-enforcement-main` — passed with `status=ahead`, `ahead=2`, `behind=0`.
+- PR #15 — verified open at `https://github.com/maxlee98/project-agent-control-plane/pull/15`,
+  base `main`, head `fix/branch-freshness-enforcement-main`, with the complete PR template body.
