@@ -1,6 +1,20 @@
 #!/usr/bin/env node
 
-const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+import { spawnSync } from "node:child_process";
+
+function credentialHelperToken() {
+  const result = spawnSync("git", ["credential", "fill"], {
+    input: "protocol=https\nhost=github.com\n\n",
+    encoding: "utf8",
+    maxBuffer: 65536,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  if (result.status !== 0 || result.error) return null;
+  const passwordLine = result.stdout.split(String.fromCharCode(10)).find((line) => line.startsWith("password="));
+  return passwordLine?.slice("password=".length) || null;
+}
+
+const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? credentialHelperToken();
 const repository = "maxlee98/project-agent-control-plane";
 const branch = "fix/terminal-hard-stop-enforcement";
 const base = "fix/github-task-status-reconciliation";
