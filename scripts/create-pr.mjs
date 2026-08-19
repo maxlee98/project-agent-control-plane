@@ -18,7 +18,8 @@ function credentialHelperToken() {
 }
 
 const args = process.argv.slice(2);
-const title = argumentValue(args, "--title");
+const titleFile = argumentValue(args, "--title-file");
+const title = titleFile ? fs.readFileSync(titleFile, "utf8").trim() : argumentValue(args, "--title");
 const head = argumentValue(args, "--head");
 const base = argumentValue(args, "--base");
 const bodyFile = argumentValue(args, "--body-file");
@@ -26,7 +27,7 @@ const repository = process.env.GITHUB_REPOSITORY ?? "maxlee98/project-agent-cont
 const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? credentialHelperToken();
 
 if (!head || !base || !bodyFile) {
-  process.stderr.write("usage: create-pr [--title <title>] --head <branch> --base <branch> --body-file <path>\n");
+  process.stderr.write("usage: create-pr [--title <title> | --title-file <path>] --head <branch> --base <branch> --body-file <path>\n");
   process.exit(2);
 }
 if (!token) {
