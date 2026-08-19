@@ -32,6 +32,15 @@ You are working on a task selected by the Project Agent Control Plane.
 - `quote>`, `dquote>`, `heredoc>`, bare `>`, `>>>`, and `...` are emergency-stop signals: cancel,
   classify the command as unknown, inspect state, and never guess a delimiter.
 
+## Compulsory pull-request template
+
+- Every PR MUST use `.github/pull_request_template.md`; GitHub REST creation does not apply it automatically.
+- Agents MUST create a patch-created body file, validate it with `scripts/verify-pr-template.mjs`,
+  and create/update the PR only through `scripts/create-pr.mjs`.
+- Agents MUST NOT send abbreviated ad-hoc PR bodies through REST, curl, or custom one-off payloads.
+- After the remote write, query and verify the PR number, URL, state, base, head, and body contract.
+- The CI template gate must pass before the task is moved to human review. Never merge automatically.
+
 ## Pull-request-first policy
 
 - Every feature, bug fix, refactor, test, documentation, configuration, and migration change must be developed on a dedicated branch and delivered through a pull request.

@@ -1,0 +1,21 @@
+name: Validate pull request template
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  template:
+    name: PR template
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check base repository
+        uses: actions/checkout@v4
+
+      - name: Validate body against the canonical template
+        run: node scripts/verify-pr-template.mjs
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}

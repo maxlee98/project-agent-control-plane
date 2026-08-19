@@ -57,6 +57,20 @@ incomplete. They never mean success.
 If a command was already submitted directly to an external shell, this repository cannot intercept
 the shell parser. Prevention therefore depends on obeying the absolute prohibitions above.
 
+## Compulsory pull-request template
+
+Every pull request MUST use `.github/pull_request_template.md` as its single source of truth.
+Agents MUST NOT create an abbreviated ad-hoc PR body through REST, curl, or a custom script.
+
+1. Create the body in a patch-created file.
+2. Run `npm run safe:run -- --timeout-ms 120000 -- node scripts/verify-pr-template.mjs --body-file <path>`.
+3. Create or update the PR only through `scripts/create-pr.mjs` with the validated body file.
+4. Query the PR afterward and verify its number, URL, state, base, head, and template headings.
+
+The CI workflow `validate-pr-template.yml` is the server-side gate. A PR with missing headings,
+unresolved template comments, incomplete validation results, or incomplete security checks must fail
+the gate and must not be considered ready for human review.
+
 ## LLD and handoff
 
 Before changing code, read or create `LLD/<task-slug>.md`. On every context resumption, reread the
