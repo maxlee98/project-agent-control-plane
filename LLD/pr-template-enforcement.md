@@ -50,6 +50,7 @@ evidence, security checklist, risks, and reviewer checklist.
 - `.github/workflows/validate-pr-template.yml` — server-side enforcement gate.
 - `scripts/create-pr.mjs` — quote-safe REST PR creator.
 - `scripts/verify-pr-template.mjs` — local validator.
+- `scripts/verify-pr-remote.mjs` — read-only remote body/state verifier.
 - `scripts/pr-template.mjs` — shared template heading and checklist validator.
 - `AGENTS.md`, `workflows/default/WORKFLOW.md` — agent behavior contract.
 - PR #12 — existing remote body to repair.
@@ -142,3 +143,5 @@ can be restored only by another explicit, template-validated update.
 - PR #12 body update — verified open at
   `https://github.com/maxlee98/project-agent-control-plane/pull/12`, base
   `fix/github-task-status-reconciliation`; no merge performed.
+- `npm run safe:run -- --timeout-ms 30000 -- node scripts/verify-pr-remote.mjs --number 12` —
+  remote PR body template and state readback passed.
