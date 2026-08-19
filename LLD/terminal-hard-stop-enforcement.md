@@ -166,6 +166,9 @@ three global skills. No runtime/data rollback is needed.
   process-group termination, and output capping.
 - `npm run safe:run -- --timeout-ms 120000 -- node scripts/verify-hard-stop.mjs` — passed; all
   global markers and repository hard-stop files were verified without printing their contents.
+- PR #12 — verified open at
+  `https://github.com/maxlee98/project-agent-control-plane/pull/12`, targeting the stacked base
+  branch `fix/github-task-status-reconciliation`; no merge was performed.
 
 ## Completion checklist
 
@@ -175,5 +178,5 @@ three global skills. No runtime/data rollback is needed.
 - [x] Repository workflow guidance hardened
 - [x] Tests, typecheck, build, and diff checks passed
 - [x] Global skill readback verified
-- [ ] Dedicated branch pushed and PR opened
-- [ ] Human merge approval remains pending
+- [x] Dedicated branch pushed and PR opened
+- [x] Human merge approval remains pending
