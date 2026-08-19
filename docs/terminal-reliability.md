@@ -3,6 +3,15 @@
 This project follows the global `terminal-reliability` skill in `~/.agents/skills/terminal-reliability/SKILL.md`.
 For Live-mode operations, also follow `.agents/skills/control-plane-live-ops/SKILL.md`.
 
+The repository also has an enforced hard-stop runner. Agent-authored development commands MUST use:
+
+```text
+npm run safe:run -- --timeout-ms 120000 -- <direct-command> <args>
+```
+
+The runner uses `shell: false`, ignores child stdin, rejects unsafe command shapes, caps output,
+and terminates timed-out process groups.
+
 The purpose is to keep agent work recoverable when a shell command, dev server, package install, or
 remote GitHub request is interrupted.
 
@@ -17,17 +26,15 @@ remote GitHub request is interrupted.
 - Verify branch, commit SHA, PR number/URL, and run status after side effects.
 - Use run-scoped workspaces for starts/retries; only explicit continuation may reuse a recorded worktree.
 - Treat missing agent output as unknown and recover by querying persisted state instead of rerunning blindly.
-- Prefer the editor/patch operation for file changes; do not use `cat > file`, `cat >> file`, or
-  incomplete/interactively entered heredocs for agent-authored content.
-- For non-trivial multi-line Python, Bash, sh, or zsh edits, use the global
-  `scripted-edit-reliability` skill: create a temporary script with the editor/patch operation,
-  assert its inputs, execute it separately, verify the result, and clean it up only afterward.
-- Never start an interactive `python`/`python3` REPL or use shell-fed Python such as
-  `python3 - <<'PY'` when the editor/patch operation is available. Use a short non-interactive
-  command or create a script with the editor/patch operation and run it separately.
+- **MUST** use the editor/patch operation for file changes; **MUST NOT** use `cat > file`, `cat >> file`,
+  `tee` multiline input, or any heredoc for agent-authored content.
+- **MUST** create a temporary inspectable `.py`, `.sh`, `.mjs`, or `.js` script for non-trivial
+  multiline/quoted logic, read it back, and execute it through `scripts/safe-run.mjs`.
+- **MUST NOT** use `bash -c`, `sh -c`, `zsh -c`, shell interactive flags, `eval`, nested shells,
+  Python REPL/stdin/`-c`, Node inline evaluation, unclosed quotes, or long inline command chains.
 - Treat `quote>`, `dquote>`, `heredoc>`, bare `>`, and Python `>>>`/`...` prompts as incomplete
-  input. Interrupt first, inspect the expected file/process state, and do not blindly repeat the
-  side effect.
+  input. Interrupt first, classify the operation as unknown, inspect state, and do not type a guessed
+  delimiter or repeat the side effect.
 
 ## Recovery commands
 
@@ -55,5 +62,5 @@ If a terminal appears to stop at a quote, heredoc, or Python continuation prompt
    bounded commands.
 4. Resume from the last verified checkpoint using the patch/editor operation.
 
-If multiline input is unavoidable, use one complete command with a quoted delimiter such as
-`<<'EOF'`, place the exact delimiter alone on the final line, and verify that the command exits.
+There is no heredoc exception for agent-authored work in this repository. Create the content with
+the editor/patch operation as a script, read it back, and run it through the safe runner.

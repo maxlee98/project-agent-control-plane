@@ -16,12 +16,18 @@ ClineCore runner, worktree manager, Git handoff, and GitHub adapter.
 | --- | --- |
 | Issues, comments, labels, PRs | GitHub |
 | Board status and custom fields | GitHub Projects V2 |
+| Issue open/closed lifecycle | Derived from GitHub Projects V2 status (`Done` closes; other workflow states open) |
 | Current process, workspace, retries | Local SQLite |
 | Detailed agent event stream | Local SQLite, with retention |
 | Human-readable checkpoints | Local activity + concise GitHub comment |
 
 The GitHub adapter should normalize GraphQL/REST payloads at its boundary. GitHub node IDs,
 project field IDs, and option IDs must not leak into orchestration rules.
+
+Human workflow status changes in Live mode reconcile the GitHub Projects V2 item and linked issue
+before updating the local projection. Sync reads Projects V2 status, repairs the derived issue
+open/closed lifecycle, and then upserts SQLite. Missing project IDs, unsupported custom status
+options, and remote mutation failures are surfaced instead of reported as successful syncs.
 
 ## Integration seams
 

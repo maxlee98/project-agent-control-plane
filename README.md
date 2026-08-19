@@ -91,6 +91,7 @@ the real error and no fake PR URL is generated. Failed worktrees are preserved f
 
 ```bash
 npm run dev        # local development server
+npm run safe:run   # bounded, stdin-isolated command runner for agent operations
 npm run build      # production build
 npm run start      # start production build
 npm run typecheck  # TypeScript validation

@@ -93,6 +93,8 @@ test("keeps Demo fixtures truthful and does not count a persisted Live row", () 
   assert.equal(promoted?.isDemo, false);
   assert.equal(promoted?.fullName, "maxlee98/project-agent-control-plane");
   assert.equal(promoted?.name, "project agent control plane");
+  const configured = repository.createProject({ fullName: "maxlee98/project-agent-control-plane", localPath: checkoutPath, githubProjectId: "PVT_live-project" });
+  assert.equal(configured?.githubProjectId, "PVT_live-project");
   assert.equal(repository.createProject({ fullName: "maxlee98/another-name", localPath: "~/Documents/Repos/project-agent-control-plane" })?.id, promoted?.id);
 
   process.env.EXECUTION_MODE = "live";

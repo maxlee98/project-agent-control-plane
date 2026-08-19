@@ -31,19 +31,66 @@ async function graphql<T>(query: string, variables: Record<string, unknown>) {
 }
 
 function statusFromLabel(value: string | undefined): TaskStatus {
-  const normalized = value?.trim().toLowerCase().replace(/\s+/g, "_");
+  const normalized = value?.trim().toLowerCase().replace(/[\s-]+/g, "_");
   if (normalized === "ready") return "ready";
-  if (normalized === "in_progress" || normalized === "in progress") return "in_progress";
-  if (normalized === "agent_review" || normalized === "agent review") return "agent_review";
-  if (normalized === "human_review" || normalized === "human review") return "human_review";
+  if (normalized === "in_progress") return "in_progress";
+  if (normalized === "agent_review" || normalized === "in_review") return "agent_review";
+  if (normalized === "human_review") return "human_review";
   if (normalized === "blocked") return "blocked";
-  if (normalized === "done") return "done";
+  if (normalized === "done" || normalized === "complete" || normalized === "completed") return "done";
   return "inbox";
 }
 
-export async function listProjectItems(project: Project) {
+type StatusOption = { id: string; name: string };
+
+export type SyncedProjectItem = {
+  projectItemId: string;
+  statusFieldId: string | null;
+  statusOptionId: string | null;
+  statusOptionName: string | null;
+  statusMapped: boolean;
+  statusOptions: StatusOption[];
+  issueNumber: number;
+  issueState: "open" | "closed";
+  title: string;
+  description: string;
+  status: TaskStatus;
+  labels: string[];
+  githubUrl: string | null;
+};
+
+const statusOptionAliases: Record<TaskStatus, string[]> = {
+  inbox: ["inbox", "backlog", "todo"],
+  ready: ["ready", "todo", "backlog"],
+  in_progress: ["in_progress", "in progress"],
+  agent_review: ["agent_review", "agent review", "in_review", "in review", "review"],
+  human_review: ["human_review", "human review", "in_review", "in review", "review"],
+  blocked: ["blocked"],
+  done: ["done", "complete", "completed"],
+};
+
+function normalizedOptionName(value: string) {
+  return value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function issueStateForTaskStatus(status: TaskStatus): "open" | "closed" {
+  return status === "done" ? "closed" : "open";
+}
+
+function findStatusOption(item: SyncedProjectItem, status: TaskStatus) {
+  const aliases = new Set(statusOptionAliases[status].map(normalizedOptionName));
+  return item.statusOptions.find((option) => aliases.has(normalizedOptionName(option.name))) ?? null;
+}
+
+function isMappedStatusOption(value: string | undefined) {
+  if (!value) return false;
+  const normalized = normalizedOptionName(value);
+  return Object.values(statusOptionAliases).some((aliases) => aliases.some((alias) => normalizedOptionName(alias) === normalized));
+}
+
+export async function listProjectItems(project: Project): Promise<SyncedProjectItem[]> {
   if (!project.githubProjectId) throw new Error("This repository has no GitHub Projects V2 ID. Add it in the repository settings before syncing.");
-  type ProjectField = { id: string; name: string; options?: Array<{ id: string; name: string }> };
+  type ProjectField = { id: string; name: string; options?: StatusOption[] };
   type ProjectItem = {
     id: string;
     content?: {
@@ -51,20 +98,77 @@ export async function listProjectItems(project: Project) {
       number?: number;
       title?: string;
       body?: string;
+      state?: "OPEN" | "CLOSED";
       url?: string;
       repository?: { nameWithOwner: string };
       labels?: { nodes: Array<{ name: string }> };
     };
-    fieldValues: { nodes: Array<{ field?: { id: string; name: string }; name?: string }> };
+    fieldValues: { nodes: Array<{ field?: { id: string; name: string }; name?: string; optionId?: string }> };
   };
   type ProjectData = { node: { fields: { nodes: ProjectField[] }; items: { nodes: ProjectItem[] } } };
-  const data = await graphql<ProjectData>(`query($id:ID!) { node(id:$id) { ... on ProjectV2 { fields(first:50) { nodes { ... on ProjectV2SingleSelectField { id name options { id name } } } } items(first:100) { nodes { id content { __typename ... on Issue { number title body url repository { nameWithOwner } labels(first:20) { nodes { name } } } } fieldValues(first:20) { nodes { ... on ProjectV2ItemFieldSingleSelectValue { field { ... on ProjectV2SingleSelectField { id name } } name } } } } } } }`, { id: project.githubProjectId });
+  const data = await graphql<ProjectData>(`query($id:ID!) { node(id:$id) { ... on ProjectV2 { fields(first:50) { nodes { ... on ProjectV2SingleSelectField { id name options { id name } } } } items(first:100) { nodes { id content { __typename ... on Issue { number title body state url repository { nameWithOwner } labels(first:20) { nodes { name } } } } fieldValues(first:20) { nodes { ... on ProjectV2ItemFieldSingleSelectValue { field { ... on ProjectV2SingleSelectField { id name } } name optionId } } } } } } }`, { id: project.githubProjectId });
   const statusField = data.node.fields.nodes.find((field) => field.name.toLowerCase() === "status");
   return data.node.items.nodes.flatMap((item) => {
     if (!item.content || item.content.__typename !== "Issue" || !item.content.number) return [];
-    const statusValue = item.fieldValues.nodes.find((value) => value.field?.id === statusField?.id)?.name;
-    return [{ issueNumber: item.content.number, title: item.content.title ?? "Untitled issue", description: item.content.body ?? "", status: statusFromLabel(statusValue), labels: item.content.labels?.nodes.map((label) => label.name.toLowerCase()) ?? [], githubUrl: item.content.url ?? null }];
+    const statusValue = item.fieldValues.nodes.find((value) => value.field?.id === statusField?.id);
+    const statusOptions = statusField?.options ?? [];
+    const statusOption = statusOptions.find((option) => option.id === statusValue?.optionId || option.name === statusValue?.name);
+    return [{
+      projectItemId: item.id,
+      statusFieldId: statusField?.id ?? null,
+      statusOptionId: statusValue?.optionId ?? statusOption?.id ?? null,
+      statusOptionName: statusValue?.name ?? statusOption?.name ?? null,
+      statusMapped: isMappedStatusOption(statusValue?.name ?? statusOption?.name),
+      statusOptions,
+      issueNumber: item.content.number,
+      issueState: item.content.state === "CLOSED" ? "closed" : "open",
+      title: item.content.title ?? "Untitled issue",
+      description: item.content.body ?? "",
+      status: statusFromLabel(statusValue?.name),
+      labels: item.content.labels?.nodes.map((label) => label.name.toLowerCase()) ?? [],
+      githubUrl: item.content.url ?? null,
+    }];
   });
+}
+
+async function updateProjectItemStatus(project: Project, item: SyncedProjectItem, status: TaskStatus) {
+  if (!project.githubProjectId || !item.statusFieldId) throw new Error("GitHub Projects V2 has no usable Status field for this item.");
+  const option = findStatusOption(item, status);
+  if (!option) throw new Error(`GitHub Projects V2 has no Status option mapped to '${status}' for issue #${item.issueNumber}.`);
+  if (item.statusOptionId === option.id) return false;
+  await graphql(`mutation($projectId:ID!, $itemId:ID!, $fieldId:ID!, $optionId:String!) { updateProjectV2ItemFieldValue(input:{ projectId:$projectId, itemId:$itemId, fieldId:$fieldId, value:{ singleSelectOptionId:$optionId } }) { projectV2Item { id } } }`, {
+    projectId: project.githubProjectId,
+    itemId: item.projectItemId,
+    fieldId: item.statusFieldId,
+    optionId: option.id,
+  });
+  return true;
+}
+
+async function updateIssueState(fullName: string, issueNumber: number, state: "open" | "closed") {
+  const { owner, repo } = repoParts(fullName);
+  const current = await readResponse(await githubRequest(`/repos/${owner}/${repo}/issues/${issueNumber}`));
+  const currentState = current.state === "closed" ? "closed" : "open";
+  if (currentState === state) return false;
+  await readResponse(await githubRequest(`/repos/${owner}/${repo}/issues/${issueNumber}`, {
+    method: "PATCH",
+    body: JSON.stringify({ state, state_reason: state === "closed" ? "completed" : "reopened" }),
+  }));
+  return true;
+}
+
+export async function reconcileProjectItemLifecycle(project: Project, item: SyncedProjectItem) {
+  if (!item.statusMapped) throw new Error(`GitHub Projects V2 Status option '${item.statusOptionName ?? "(empty)"}' for issue #${item.issueNumber} has no local workflow mapping.`);
+  const issueChanged = await updateIssueState(project.fullName, item.issueNumber, issueStateForTaskStatus(item.status));
+  return { issueChanged };
+}
+
+export async function reconcileTaskStatus(project: Project, issueNumber: number, status: TaskStatus) {
+  const item = (await listProjectItems(project)).find((candidate) => candidate.issueNumber === issueNumber);
+  if (!item) throw new Error(`Issue #${issueNumber} is not present in the configured GitHub Projects V2 board.`);
+  const projectChanged = await updateProjectItemStatus(project, item, status);
+  const issueChanged = await updateIssueState(project.fullName, issueNumber, issueStateForTaskStatus(status));
+  return { projectChanged, issueChanged };
 }
 
 export async function createPullRequest(fullName: string, task: Task, run: AgentRun) {
