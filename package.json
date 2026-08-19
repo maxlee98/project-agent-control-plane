@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "safe:run": "node scripts/safe-run.mjs",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
