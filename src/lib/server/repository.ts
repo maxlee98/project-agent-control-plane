@@ -167,7 +167,7 @@ export function createProject(input: { fullName: string; localPath: string; desc
   const existingRow = db.prepare("SELECT * FROM projects WHERE full_name = ?").get(input.fullName) as ProjectRow | undefined
     ?? (db.prepare("SELECT * FROM projects").all() as ProjectRow[]).find((row) => normalizeLocalPath(String(row.local_path)) === normalizedPath);
   if (existingRow) {
-    if (Number(existingRow.is_demo)) {
+    if (Number(existingRow.is_demo) || input.githubProjectId?.trim()) {
       db.prepare("UPDATE projects SET name = ?, full_name = ?, description = ?, initials = ?, local_path = ?, github_project_id = ?, is_demo = 0, status = 'attention', last_synced_at = ? WHERE id = ?")
         .run(displayName, input.fullName, input.description ?? String(existingRow.description ?? ""), initials, input.localPath, input.githubProjectId?.trim() || String(existingRow.github_project_id ?? "") || null, isoNow(), existingRow.id);
     }
@@ -198,7 +198,7 @@ export function createTask(input: { projectId: string; title: string; descriptio
 export function upsertSyncedTask(input: { projectId: string; issueNumber: number; title: string; description: string; status: TaskStatus; labels: string[]; githubUrl: string | null }) {
   const existing = db.prepare("SELECT id FROM tasks WHERE project_id = ? AND issue_number = ?").get(input.projectId, input.issueNumber) as { id?: string } | undefined;
   if (!existing?.id) return createTask(input);
-  updateTask(existing.id, { title: input.title, description: input.description, status: input.status, summary: "Synced from GitHub Projects V2." });
+  updateTask(existing.id, { title: input.title, description: input.description, status: input.status, agentState: input.status === "done" ? "idle" : undefined, summary: "Synced from GitHub Projects V2." });
   db.prepare("UPDATE tasks SET labels_json = ?, github_url = ?, updated_at = ? WHERE id = ?").run(json(input.labels), input.githubUrl, isoNow(), existing.id);
   return getTask(existing.id);
 }
@@ -206,7 +206,8 @@ export function upsertSyncedTask(input: { projectId: string; issueNumber: number
 export function updateTask(taskId: string, input: { status?: TaskStatus; priority?: number; title?: string; description?: string; summary?: string; agentState?: Task["agentState"]; branchName?: string | null; prUrl?: string | null }) {
   const task = getTask(taskId);
   if (!task) return null;
-  const next = { ...task, ...input, updatedAt: isoNow() };
+  const provided = Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
+  const next = { ...task, ...provided, updatedAt: isoNow() };
   db.prepare(`
     UPDATE tasks SET title = ?, description = ?, status = ?, priority = ?, agent_state = ?, current_summary = ?, branch_name = ?, pr_url = ?, updated_at = ? WHERE id = ?
   `).run(next.title, next.description, next.status, next.priority, next.agentState, next.currentSummary, next.branchName, next.prUrl, next.updatedAt, taskId);
