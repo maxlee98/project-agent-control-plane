@@ -28,6 +28,7 @@ to run.
    bounds execution time/output, and terminates timed-out process groups.
 4. Make recovery from a continuation prompt interrupt-first and state-verification-first.
 5. Harden the canonical global skills without creating duplicate skill names.
+6. Version repository-local LLD and terminal overlays so fresh clones do not depend on a prior global install.
 
 ## Non-goals
 
@@ -59,6 +60,8 @@ to run.
 
 - Global skills: `~/.agents/skills/{terminal-reliability,scripted-edit-reliability,lld-driven-development}/SKILL.md`.
 - Repository agent contract: `AGENTS.md` and `workflows/default/WORKFLOW.md`.
+- Repository-local skill overlays: `.agents/skills/lld-driven-development/SKILL.md` and
+  `.agents/skills/terminal-reliability/SKILL.md`.
 - Repository operations: `scripts/safe-run.mjs`, `scripts/install-terminal-hardening.mjs`, and
   `scripts/verify-hard-stop.mjs`.
 - Regression tests: `tests/safe-run.test.ts`.
@@ -97,6 +100,12 @@ work in this repository; use the patch/editor operation instead.
 Node scripts are allowed as inspectable script files because the runner itself is Node-based; they
 must still use bounded child processes and must not read secrets. The runner is a guard, not a
 replacement for the hard-stop instruction.
+
+### Repository-local skill overlays
+
+The local overlays make the LLD phase gates and terminal hard stop available to future agents from
+the repository itself. They are intentionally concise operational overlays; the global skills remain
+the full canonical references when installed.
 
 ### Global skill installer
 
@@ -146,6 +155,7 @@ three global skills. No runtime/data rollback is needed.
 - 2026-08-20: Guidance-only rules were insufficient because the agent still submitted a long inline command that reached `quote>`.
 - 2026-08-20: A complete heredoc is no longer an agent-authored exception; patch-created script files are mandatory for multiline logic.
 - 2026-08-20: A local runner uses `shell: false`, ignored stdin, finite timeout, output cap, and process-group cleanup.
+- 2026-08-20: Added repository-local skill overlays so a fresh clone carries the required LLD and terminal contracts.
 
 ## Open questions and assumptions
 
@@ -155,13 +165,15 @@ three global skills. No runtime/data rollback is needed.
 
 ## Validation results
 
-- `npm run safe:run -- --timeout-ms 120000 -- npm test` — passed, 15 tests.
+- `npm run safe:run -- --timeout-ms 120000 -- npm test` — passed, 18 tests.
 - `npm run safe:run -- --timeout-ms 120000 -- npm run typecheck` — passed.
 - `npm run safe:run -- --timeout-ms 120000 -- npm run build` — passed. Next reported the existing
   non-fatal Turbopack NFT tracing warning through `next.config.mjs` and `src/lib/server/db.ts`.
 - `npm run safe:run -- --timeout-ms 120000 -- node scripts/install-terminal-hardening.mjs` —
   second run reported all three global markers as already present; installer is idempotent.
 - Global readback — verified `ABSOLUTE TERMINAL HARD STOP` in all three canonical global skill files.
+- Repository-local readback — verified the LLD phase-gate overlay and terminal hard-stop overlay in
+  `.agents/skills/` for fresh-clone agents.
 - The runner tests verified pre-spawn rejection, unsafe script rejection, ignored stdin, timeout
   process-group termination, and output capping.
 - `npm run safe:run -- --timeout-ms 120000 -- node scripts/verify-hard-stop.mjs` — passed; all

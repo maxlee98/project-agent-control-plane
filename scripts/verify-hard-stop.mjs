@@ -12,10 +12,11 @@ const globalSkills = [
 ];
 const repositoryFiles = [
   "AGENTS.md",
+  ".agents/skills/lld-driven-development/SKILL.md",
+  ".agents/skills/terminal-reliability/SKILL.md",
   "LLD/terminal-hard-stop-enforcement.md",
   "scripts/safe-run.mjs",
   "scripts/install-terminal-hardening.mjs",
-  "scripts/create-hard-stop-pr.mjs",
   "tests/safe-run.test.ts",
   "docs/terminal-reliability.md",
   "workflows/default/WORKFLOW.md",
