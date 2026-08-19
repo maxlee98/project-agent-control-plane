@@ -51,6 +51,7 @@ evidence, security checklist, risks, and reviewer checklist.
 - `scripts/create-pr.mjs` — quote-safe REST PR creator.
 - `scripts/verify-pr-template.mjs` — local validator.
 - `scripts/verify-pr-remote.mjs` — read-only remote body/state verifier.
+- `scripts/verify-branch-freshness.mjs` — main-branch freshness gate used before PR writes.
 - `scripts/pr-template.mjs` — shared template heading and checklist validator.
 - `AGENTS.md`, `workflows/default/WORKFLOW.md` — agent behavior contract.
 - PR #12 — existing remote body to repair.

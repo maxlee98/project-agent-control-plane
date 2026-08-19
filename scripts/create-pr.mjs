@@ -2,6 +2,7 @@
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import { assertFreshComparison } from "./branch-freshness.mjs";
 import { assertValidPrBody, readTemplate } from "./pr-template.mjs";
 
 function argumentValue(args, name) {
@@ -46,6 +47,9 @@ async function github(pathname, init = {}) {
 }
 
 const owner = repository.split("/")[0];
+const freshnessBase = process.env.PR_FRESHNESS_BASE ?? "main";
+const comparison = await github(`/compare/${encodeURIComponent(freshnessBase)}...${encodeURIComponent(head)}`);
+assertFreshComparison(comparison, freshnessBase, head);
 const existing = await github(`/pulls?state=open&head=${encodeURIComponent(`${owner}:${head}`)}&per_page=10`);
 if (Array.isArray(existing) && existing[0]) {
   const update = { body, base };

@@ -92,6 +92,8 @@ the real error and no fake PR URL is generated. Failed worktrees are preserved f
 ```bash
 npm run dev        # local development server
 npm run safe:run   # bounded, stdin-isolated command runner for agent operations
+npm run safe:run -- --timeout-ms 30000 -- node scripts/verify-branch-freshness.mjs --base main --head feature-branch
+npm run safe:run -- --timeout-ms 120000 -- node scripts/update-branch-from-main.mjs --strategy update
 npm run build      # production build
 npm run start      # start production build
 npm run typecheck  # TypeScript validation
