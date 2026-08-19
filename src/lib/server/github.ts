@@ -25,14 +25,14 @@ async function graphql<T>(query: string, variables: Record<string, unknown>) {
   const token = process.env.GITHUB_TOKEN;
   if (!token) throw new Error("GITHUB_TOKEN is not configured.");
   const response = await fetch("https://api.github.com/graphql", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ query, variables }) });
-  const body = await response.json() as { data?: T; errors?: Array<{ message: string }> };
+  const body = await response.json().catch(() => ({})) as { data?: T; errors?: Array<{ message?: string }> };
   if (!response.ok || body.errors?.length) throw new Error(`GitHub GraphQL: ${body.errors?.map((error) => error.message).join(", ") ?? "request failed"}`);
   return body.data as T;
 }
 
 function statusFromLabel(value: string | undefined): TaskStatus {
   const normalized = value?.trim().toLowerCase().replace(/[\s-]+/g, "_");
-  if (normalized === "ready") return "ready";
+  if (normalized === "ready" || normalized === "todo" || normalized === "backlog") return "ready";
   if (normalized === "in_progress") return "in_progress";
   if (normalized === "agent_review" || normalized === "in_review") return "agent_review";
   if (normalized === "human_review") return "human_review";
@@ -45,6 +45,7 @@ type StatusOption = { id: string; name: string };
 
 export type SyncedProjectItem = {
   projectItemId: string;
+  contentNodeId: string | null;
   statusFieldId: string | null;
   statusOptionId: string | null;
   statusOptionName: string | null;
@@ -62,10 +63,10 @@ export type SyncedProjectItem = {
 const statusOptionAliases: Record<TaskStatus, string[]> = {
   inbox: ["inbox", "backlog", "todo"],
   ready: ["ready", "todo", "backlog"],
-  in_progress: ["in_progress", "in progress"],
-  agent_review: ["agent_review", "agent review", "in_review", "in review", "review"],
-  human_review: ["human_review", "human review", "in_review", "in review", "review"],
-  blocked: ["blocked"],
+  in_progress: ["in_progress", "in progress", "in-progress"],
+  agent_review: ["agent_review", "agent review", "in_review", "in review", "review", "in progress"],
+  human_review: ["human_review", "human review", "in_review", "in review", "review", "in progress"],
+  blocked: ["blocked", "in progress"],
   done: ["done", "complete", "completed"],
 };
 
@@ -90,11 +91,12 @@ function isMappedStatusOption(value: string | undefined) {
 
 export async function listProjectItems(project: Project): Promise<SyncedProjectItem[]> {
   if (!project.githubProjectId) throw new Error("This repository has no GitHub Projects V2 ID. Add it in the repository settings before syncing.");
-  type ProjectField = { id: string; name: string; options?: StatusOption[] };
+  type ProjectField = { id: string; name?: string; options?: StatusOption[] };
   type ProjectItem = {
     id: string;
     content?: {
       __typename: string;
+      id?: string;
       number?: number;
       title?: string;
       body?: string;
@@ -105,16 +107,87 @@ export async function listProjectItems(project: Project): Promise<SyncedProjectI
     };
     fieldValues: { nodes: Array<{ field?: { id: string; name: string }; name?: string; optionId?: string }> };
   };
-  type ProjectData = { node: { fields: { nodes: ProjectField[] }; items: { nodes: ProjectItem[] } } };
-  const data = await graphql<ProjectData>(`query($id:ID!) { node(id:$id) { ... on ProjectV2 { fields(first:50) { nodes { ... on ProjectV2SingleSelectField { id name options { id name } } } } items(first:100) { nodes { id content { __typename ... on Issue { number title body state url repository { nameWithOwner } labels(first:20) { nodes { name } } } } fieldValues(first:20) { nodes { ... on ProjectV2ItemFieldSingleSelectValue { field { ... on ProjectV2SingleSelectField { id name } } name optionId } } } } } } }`, { id: project.githubProjectId });
-  const statusField = data.node.fields.nodes.find((field) => field.name.toLowerCase() === "status");
-  return data.node.items.nodes.flatMap((item) => {
+  type ProjectData = {
+    node: {
+      __typename: string;
+      fields: { nodes: ProjectField[] };
+      items: { nodes: ProjectItem[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
+    } | null;
+  };
+  const items: ProjectItem[] = [];
+  let cursor: string | null = null;
+  let statusField: ProjectField | undefined;
+  do {
+    const data: ProjectData = await graphql<ProjectData>(`query ProjectItems($id: ID!, $after: String) {
+      node(id: $id) {
+        __typename
+        ... on ProjectV2 {
+          fields(first: 50) {
+            nodes {
+              __typename
+              ... on ProjectV2SingleSelectField {
+                id
+                name
+                options { id name }
+              }
+            }
+          }
+          items(first: 100, after: $after) {
+            nodes {
+              id
+              content {
+                __typename
+                ... on Issue {
+                  id
+                  number
+                  title
+                  body
+                  state
+                  url
+                  repository { nameWithOwner }
+                  labels(first: 20) { nodes { name } }
+                }
+                ... on PullRequest {
+                  id
+                  number
+                  title
+                  url
+                  repository { nameWithOwner }
+                }
+              }
+              fieldValues(first: 20) {
+                nodes {
+                  __typename
+                  ... on ProjectV2ItemFieldSingleSelectValue {
+                    field { ... on ProjectV2SingleSelectField { id name } }
+                    name
+                    optionId
+                  }
+                }
+              }
+            }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+      }
+    }`, { id: project.githubProjectId, after: cursor });
+    if (!data.node) throw new Error(`GitHub Projects V2 project '${project.githubProjectId}' was not found or is not accessible to the configured token.`);
+    if (data.node.__typename !== "ProjectV2") throw new Error(`GitHub node '${project.githubProjectId}' is not a Projects V2 project.`);
+    statusField ??= data.node.fields.nodes.find((field: ProjectField) => field.name?.toLowerCase() === "status");
+    items.push(...data.node.items.nodes);
+    cursor = data.node.items.pageInfo.hasNextPage ? data.node.items.pageInfo.endCursor : null;
+    if (data.node.items.pageInfo.hasNextPage && !cursor) throw new Error("GitHub Projects V2 returned a page without a cursor.");
+  } while (cursor);
+  if (!statusField) throw new Error(`GitHub Projects V2 project '${project.githubProjectId}' has no usable Status field.`);
+  return items.flatMap((item) => {
     if (!item.content || item.content.__typename !== "Issue" || !item.content.number) return [];
+    if (item.content.repository?.nameWithOwner !== project.fullName) return [];
     const statusValue = item.fieldValues.nodes.find((value) => value.field?.id === statusField?.id);
     const statusOptions = statusField?.options ?? [];
     const statusOption = statusOptions.find((option) => option.id === statusValue?.optionId || option.name === statusValue?.name);
     return [{
       projectItemId: item.id,
+      contentNodeId: item.content.id ?? null,
       statusFieldId: statusField?.id ?? null,
       statusOptionId: statusValue?.optionId ?? statusOption?.id ?? null,
       statusOptionName: statusValue?.name ?? statusOption?.name ?? null,
@@ -129,6 +202,23 @@ export async function listProjectItems(project: Project): Promise<SyncedProjectI
       githubUrl: item.content.url ?? null,
     }];
   });
+}
+
+type CreatedIssue = { number: number; url: string; nodeId: string };
+
+export async function ensureProjectItem(project: Project, issue: CreatedIssue) {
+  const existing = (await listProjectItems(project)).find((item) => item.issueNumber === issue.number || item.contentNodeId === issue.nodeId);
+  if (existing) return { projectChanged: false, item: existing };
+  type AddProjectItemData = { addProjectV2ItemById: { item: { id: string } | null } };
+  const data = await graphql<AddProjectItemData>(`mutation AddProjectItem($projectId: ID!, $contentId: ID!) {
+    addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+      item { id }
+    }
+  }`, { projectId: project.githubProjectId, contentId: issue.nodeId });
+  if (!data.addProjectV2ItemById.item?.id) throw new Error(`GitHub Projects V2 did not return an item for issue #${issue.number}.`);
+  const item = (await listProjectItems(project)).find((candidate) => candidate.issueNumber === issue.number || candidate.contentNodeId === issue.nodeId);
+  if (!item) throw new Error(`Issue #${issue.number} was added remotely but could not be read back from GitHub Projects V2.`);
+  return { projectChanged: true, item };
 }
 
 async function updateProjectItemStatus(project: Project, item: SyncedProjectItem, status: TaskStatus) {
@@ -182,8 +272,10 @@ export async function publishComment(fullName: string, issueNumber: number, body
   await readResponse(await githubRequest(`/repos/${owner}/${repo}/issues/${issueNumber}/comments`, { method: "POST", body: JSON.stringify({ body }) }));
 }
 
-export async function createIssue(fullName: string, title: string, body: string) {
+export async function createIssue(fullName: string, title: string, body: string): Promise<CreatedIssue> {
   const { owner, repo } = repoParts(fullName);
   const result = await readResponse(await githubRequest(`/repos/${owner}/${repo}/issues`, { method: "POST", body: JSON.stringify({ title, body }) }));
-  return { number: Number(result.number), url: String(result.html_url) };
+  const nodeId = String(result.node_id ?? "");
+  if (!nodeId) throw new Error("GitHub created the Issue but did not return its node ID for Projects V2 insertion.");
+  return { number: Number(result.number), url: String(result.html_url), nodeId };
 }

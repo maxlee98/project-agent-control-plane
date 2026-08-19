@@ -148,6 +148,11 @@ export function getTask(taskId: string) {
   return row ? mapTask(row as TaskRow) : null;
 }
 
+export function getTaskByIssue(projectId: string, issueNumber: number) {
+  const row = db.prepare("SELECT * FROM tasks WHERE project_id = ? AND issue_number = ?").get(projectId, issueNumber);
+  return row ? mapTask(row as TaskRow) : null;
+}
+
 export function getRun(runId: string) {
   const row = db.prepare("SELECT * FROM runs WHERE id = ?").get(runId);
   return row ? mapRun(row as RunRow) : null;

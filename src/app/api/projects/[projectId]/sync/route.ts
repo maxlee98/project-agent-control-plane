@@ -1,5 +1,5 @@
 import { listProjectItems, reconcileProjectItemLifecycle } from "@/lib/server/github";
-import { getProject, touchProject, upsertSyncedTask } from "@/lib/server/repository";
+import { getProject, getTaskByIssue, touchProject, upsertSyncedTask } from "@/lib/server/repository";
 
 export async function POST(_request: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
@@ -9,12 +9,16 @@ export async function POST(_request: Request, { params }: { params: Promise<{ pr
   try {
     const items = await listProjectItems(project);
     let repairedIssues = 0;
+    let imported = 0;
+    let updated = 0;
     for (const item of items) {
       const result = await reconcileProjectItemLifecycle(project, item);
       if (result.issueChanged) repairedIssues += 1;
+      if (getTaskByIssue(projectId, item.issueNumber)) updated += 1;
+      else imported += 1;
     }
     items.forEach((item) => upsertSyncedTask({ projectId, ...item }));
     touchProject(projectId);
-    return Response.json({ ok: true, mode: "live", count: items.length, repairedIssues, syncedAt: new Date().toISOString() });
+    return Response.json({ ok: true, mode: "live", count: items.length, imported, updated, repairedIssues, syncedAt: new Date().toISOString() });
   } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "GitHub sync failed." }, { status: 502 }); }
 }
