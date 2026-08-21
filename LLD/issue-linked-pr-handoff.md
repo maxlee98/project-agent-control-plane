@@ -2,7 +2,7 @@
 
 ## Status
 
-- **Status:** In progress; implementation complete and Issue #28 available for PR handoff
+- **Status:** Complete; PR #29 open pending human review
 - **Owner:** Project Agent Control Plane
 - **Date:** 2026-08-21
 - **Related task or issue:** https://github.com/maxlee98/project-agent-control-plane/issues/28
@@ -120,14 +120,16 @@ or Issue is deleted by this change.
 - Global/local LLD policy readback: verified the canonical Issue, `Refs #<number>`, Issue-only board,
   and fail-before-PR rules.
 - Hard-stop verifier: passed.
-- `npm test`: passed, 24 tests and 0 failures.
+- `npm test`: passed, 26 tests and 0 failures.
 - `npm run typecheck`: passed.
 - `npm run build`: passed. The existing non-fatal Turbopack NFT tracing warning references
   `next.config.mjs` and `src/lib/server/db.ts`; it is unrelated to this policy change.
 - `git diff --check`: passed.
-- No Project PR item was created and no remote PR write was attempted. A canonical Issue number for
-  this policy change was not supplied, so PR handoff remains intentionally blocked rather than
-  inventing a linkage.
+- PR #29 remote verification: passed with state `open`, base `main`, head
+  `fix/issue-linked-pr-handoff`, and URL `https://github.com/maxlee98/project-agent-control-plane/pull/29`.
+- PR #29 body template verification: passed and contains the non-closing `Refs #28` linkage.
+- No Project PR item was created: the PR handoff uses the Pull Requests API only, and the Project
+  integration path/tests add and reconcile Issues only.
 
 ## Decision log
 
@@ -137,6 +139,8 @@ or Issue is deleted by this change.
   merely because a PR was opened.
 - 2026-08-21: Update the existing LLD-driven-development skill rather than create a duplicate skill
   name; enforce the same invariant in the template validator and runtime adapter.
+- 2026-08-21: Issue #28 was supplied as the canonical tracking Issue; PR #29 was created with
+  `Refs #28` and remains open for human review.
 
 ## Open questions and assumptions
 
@@ -154,5 +158,5 @@ or Issue is deleted by this change.
 - [x] Runtime PR guard/link updated
 - [x] Tests, typecheck, build, and diff checks passed
 - [x] LLD and handoff documentation updated
-- [x] Tracking Issue identified as #28; PR linkage pending remote creation and verification
+- [x] Tracking Issue #28 and PR #29 linkage verified
 - [ ] Human review and merge approval remain pending
