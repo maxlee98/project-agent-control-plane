@@ -193,7 +193,7 @@ changed.
   terminal-guidance files are changed/untracked on `fix/36-live-agent-run-reliability`; `.env.local`
   was not read or modified. GitHub Issue #37 was created and verified OPEN. PR #38 was created and
   verified OPEN against `main` with the expected feature head and `Fixes #37` linkage; the final LLD
-  handoff commit is being published separately.
+  handoff commit `634886c` was published separately.
 
 ## Completion checklist
 
