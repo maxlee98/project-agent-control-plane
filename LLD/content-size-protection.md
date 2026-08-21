@@ -2,7 +2,7 @@
 
 ## Status
 
-- **Status:** Complete; pending PR review
+- **Status:** Complete; PR #38 open for human review
 - **Owner:** Project Agent Control Plane
 - **Date:** 2026-08-22
 - **Related task or issue:** GitHub Issue #37 — prevent OpenRouter 403 failures caused by content-filter requests exceeding the provider's maximum input size.
@@ -191,8 +191,9 @@ changed.
 - `npm run safe:run -- --timeout-ms 120000 -- git diff --check` — passed.
 - Final pre-handoff inspection: only the intended skill, LLD, installer, test, README, workflow, and
   terminal-guidance files are changed/untracked on `fix/36-live-agent-run-reliability`; `.env.local`
-  was not read or modified. GitHub Issue #37 was created and verified OPEN; PR handoff is pending
-  branch publication and freshness verification.
+  was not read or modified. GitHub Issue #37 was created and verified OPEN. PR #38 was created and
+  verified OPEN against `main` with the expected feature head and `Fixes #37` linkage; the final LLD
+  handoff commit is being published separately.
 
 ## Completion checklist
 
