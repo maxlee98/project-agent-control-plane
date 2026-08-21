@@ -1,10 +1,12 @@
 import { ClineCore } from "@cline/sdk";
 import type { AgentRunInput } from "../integrations";
+import { readRunUsage, type RunUsageSnapshot } from "./cost";
 import { redactSecrets } from "./redaction";
 
 export interface ClineCallbacks {
   onActivity(message: string, detail?: string | null): void;
   onEvent(type: string, message: string, detail?: string | null): void;
+  onUsage?(usage: RunUsageSnapshot): void;
 }
 
 const activeSessions = new Map<string, { cline: ClineCore; sessionId: string }>();
@@ -35,9 +37,12 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string, o
   });
 }
 
-export async function runCline(input: AgentRunInput & { runId: string }, callbacks: ClineCallbacks) {
+export async function runCline(input: AgentRunInput & { runId: string; providerId?: string; modelId?: string }, callbacks: ClineCallbacks) {
   const cline = await ClineCore.create({ clientName: "project-agent-control-plane", backendMode: "local" });
+  const providerId = input.providerId ?? process.env.CLINE_PROVIDER_ID ?? "anthropic";
+  const modelId = input.modelId ?? process.env.CLINE_MODEL_ID ?? "claude-sonnet-4-5";
   let sessionId = "";
+  let latestUsage: RunUsageSnapshot | null = null;
   let lastActivityAt = Date.now();
   let timedOut = false;
   const maxDurationMs = durationFromEnv("AGENT_MAX_RUN_MINUTES", 45);
@@ -55,6 +60,17 @@ export async function runCline(input: AgentRunInput & { runId: string }, callbac
     if (sessionId) void cline.stop(sessionId).catch(() => undefined);
     else void cline.dispose().catch(() => undefined);
   };
+  const reportUsage = async () => {
+    if (!sessionId) return latestUsage;
+    try {
+      const summary = await cline.getAccumulatedUsage(sessionId);
+      latestUsage = await readRunUsage(providerId, modelId, summary?.aggregateUsage ?? summary?.usage) ?? latestUsage;
+      if (latestUsage) callbacks.onUsage?.(latestUsage);
+    } catch {
+      // Usage collection must not turn a completed agent run into a failed handoff.
+    }
+    return latestUsage;
+  };
   const watchdog = setInterval(() => {
     if (Date.now() - lastActivityAt >= inactivityMs) stopAfterTimeout(timeoutError("inactivity"));
   }, Math.min(30_000, inactivityMs));
@@ -69,7 +85,33 @@ export async function runCline(input: AgentRunInput & { runId: string }, callbac
     if (payload.sessionId && sessionId && payload.sessionId !== sessionId) return;
 
     if (event.type === "agent_event" && payload.event) {
-      const agentEvent = payload.event;
+      const agentEvent = payload.event as {
+        type?: string;
+        text?: string;
+        message?: string;
+        toolName?: string;
+        error?: Error;
+        inputTokens?: number;
+        outputTokens?: number;
+        cacheReadTokens?: number;
+        cacheWriteTokens?: number;
+        totalInputTokens?: number;
+        totalOutputTokens?: number;
+        totalCacheReadTokens?: number;
+        totalCacheWriteTokens?: number;
+        totalCost?: number;
+        usage?: {
+          inputTokens?: number;
+          outputTokens?: number;
+          cacheReadTokens?: number;
+          cacheWriteTokens?: number;
+          totalInputTokens?: number;
+          totalOutputTokens?: number;
+          totalCacheReadTokens?: number;
+          totalCacheWriteTokens?: number;
+          totalCost?: number;
+        };
+      };
       const detail = redactSecrets(
         agentEvent.type === "error"
           ? agentEvent.error?.message
@@ -83,7 +125,38 @@ export async function runCline(input: AgentRunInput & { runId: string }, callbac
       if (agentEvent.type === "content_start" || agentEvent.type === "notice") {
         callbacks.onActivity(redactSecrets(agentEvent.message ?? agentEvent.toolName ?? agentEvent.type) ?? "Agent event", detail);
       }
-      if (agentEvent.type === "done") resolveEnded({ text: redactSecrets(agentEvent.text) ?? "" });
+      if (agentEvent.type === "usage") {
+        const usage = {
+          inputTokens: agentEvent.totalInputTokens ?? agentEvent.inputTokens ?? 0,
+          outputTokens: agentEvent.totalOutputTokens ?? agentEvent.outputTokens ?? 0,
+          cacheReadTokens: agentEvent.totalCacheReadTokens ?? agentEvent.cacheReadTokens ?? 0,
+          cacheWriteTokens: agentEvent.totalCacheWriteTokens ?? agentEvent.cacheWriteTokens ?? 0,
+          totalCost: agentEvent.totalCost,
+        };
+        void readRunUsage(providerId, modelId, usage).then((snapshot) => {
+          if (snapshot) {
+            latestUsage = snapshot;
+            callbacks.onUsage?.(snapshot);
+          }
+        }).catch(() => undefined);
+      }
+      if (agentEvent.type === "done") {
+        if (agentEvent.usage) {
+          void readRunUsage(providerId, modelId, {
+            inputTokens: agentEvent.usage.totalInputTokens ?? agentEvent.usage.inputTokens ?? 0,
+            outputTokens: agentEvent.usage.totalOutputTokens ?? agentEvent.usage.outputTokens ?? 0,
+            cacheReadTokens: agentEvent.usage.totalCacheReadTokens ?? agentEvent.usage.cacheReadTokens ?? 0,
+            cacheWriteTokens: agentEvent.usage.totalCacheWriteTokens ?? agentEvent.usage.cacheWriteTokens ?? 0,
+            totalCost: agentEvent.usage.totalCost,
+          }).then((snapshot) => {
+            if (snapshot) {
+              latestUsage = snapshot;
+              callbacks.onUsage?.(snapshot);
+            }
+          }).catch(() => undefined);
+        }
+        resolveEnded({ text: redactSecrets(agentEvent.text) ?? "" });
+      }
       if (agentEvent.type === "error") rejectEnded(agentEvent.error instanceof Error ? agentEvent.error : new Error("Cline reported an error."));
     } else if (event.type === "chunk" && payload.chunk) {
       callbacks.onEvent("chunk", "Agent output", redactSecrets(payload.chunk.slice(-1000)));
@@ -99,8 +172,8 @@ export async function runCline(input: AgentRunInput & { runId: string }, callbac
       prompt: input.prompt,
       interactive: false,
       config: {
-        providerId: process.env.CLINE_PROVIDER_ID ?? "anthropic",
-        modelId: process.env.CLINE_MODEL_ID ?? "claude-sonnet-4-5",
+        providerId,
+        modelId,
         apiKey: process.env.CLINE_API_KEY,
         systemPrompt: "You are an autonomous coding agent. Work only in the assigned workspace. Make focused changes, run validation, and report a concise handoff.",
         cwd: input.workspacePath,
@@ -118,7 +191,11 @@ export async function runCline(input: AgentRunInput & { runId: string }, callbac
     callbacks.onEvent("session_started", "Cline session started", sessionId);
     const remainingMs = Math.max(1, deadline - Date.now());
     const completion = await withTimeout(ended, remainingMs, "completion", () => stopAfterTimeout(timeoutError("completion")));
-    return { sessionId, ...completion };
+    await reportUsage();
+    return { sessionId, ...completion, usage: latestUsage };
+  } catch (error) {
+    await reportUsage();
+    throw error;
   } finally {
     clearInterval(watchdog);
     activeSessions.delete(input.runId);

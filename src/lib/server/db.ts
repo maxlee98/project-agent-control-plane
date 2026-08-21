@@ -70,7 +70,15 @@ function createDatabase() {
       execution_mode TEXT NOT NULL DEFAULT 'demo',
       commit_sha TEXT,
       changed_files_json TEXT NOT NULL DEFAULT '[]',
-      checks_json TEXT NOT NULL DEFAULT '[]'
+      checks_json TEXT NOT NULL DEFAULT '[]',
+      provider_id TEXT NOT NULL DEFAULT '',
+      model_id TEXT NOT NULL DEFAULT '',
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+      actual_cost_micros INTEGER,
+      cost_source TEXT NOT NULL DEFAULT 'pending'
     );
     CREATE TABLE IF NOT EXISTS activity (
       id TEXT PRIMARY KEY,
@@ -103,6 +111,15 @@ function createDatabase() {
   if (!existingColumns.has("commit_sha")) database.exec("ALTER TABLE runs ADD COLUMN commit_sha TEXT");
   if (!existingColumns.has("changed_files_json")) database.exec("ALTER TABLE runs ADD COLUMN changed_files_json TEXT NOT NULL DEFAULT '[]'");
   if (!existingColumns.has("checks_json")) database.exec("ALTER TABLE runs ADD COLUMN checks_json TEXT NOT NULL DEFAULT '[]'");
+  if (!existingColumns.has("provider_id")) database.exec("ALTER TABLE runs ADD COLUMN provider_id TEXT NOT NULL DEFAULT ''");
+  if (!existingColumns.has("model_id")) database.exec("ALTER TABLE runs ADD COLUMN model_id TEXT NOT NULL DEFAULT ''");
+  if (!existingColumns.has("input_tokens")) database.exec("ALTER TABLE runs ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0");
+  if (!existingColumns.has("output_tokens")) database.exec("ALTER TABLE runs ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0");
+  if (!existingColumns.has("cache_read_tokens")) database.exec("ALTER TABLE runs ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0");
+  if (!existingColumns.has("cache_write_tokens")) database.exec("ALTER TABLE runs ADD COLUMN cache_write_tokens INTEGER NOT NULL DEFAULT 0");
+  if (!existingColumns.has("actual_cost_micros")) database.exec("ALTER TABLE runs ADD COLUMN actual_cost_micros INTEGER");
+  if (!existingColumns.has("cost_source")) database.exec("ALTER TABLE runs ADD COLUMN cost_source TEXT NOT NULL DEFAULT 'pending'");
+  database.prepare("UPDATE runs SET cost_source = 'unavailable' WHERE cost_source = 'pending' AND status IN ('completed', 'failed', 'stopped')").run();
 
   const taskColumns = database.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
   if (!new Set(taskColumns.map((column) => column.name)).has("estimated_cost_cents")) database.exec("ALTER TABLE tasks ADD COLUMN estimated_cost_cents INTEGER NOT NULL DEFAULT 0");
@@ -331,7 +348,7 @@ function reconcileProjects(database: Database.Database) {
   const reconcile = database.transaction(() => {
     database.prepare("UPDATE projects SET is_demo = 1 WHERE id IN ('project-control-plane', 'project-job-hopper')").run();
     database.prepare("UPDATE tasks SET status = 'ready', agent_state = 'idle', current_summary = 'Demo sample only. Start a task to create a real agent run.' WHERE id = 'task-live-overview'").run();
-    database.prepare("UPDATE runs SET status = 'completed', session_id = NULL, progress = 100, current_activity = 'Demo sample completed — no agent session was started.', finished_at = COALESCE(finished_at, ?) WHERE id = 'run-seed-live-overview'").run(new Date().toISOString());
+    database.prepare("UPDATE runs SET status = 'completed', session_id = NULL, progress = 100, current_activity = 'Demo sample completed — no agent session was started.', cost_source = 'unavailable', finished_at = COALESCE(finished_at, ?) WHERE id = 'run-seed-live-overview'").run(new Date().toISOString());
     const rows = database.prepare("SELECT id, local_path, is_demo FROM projects ORDER BY id").all() as Array<{ id: string; local_path: string; is_demo: number }>;
     const groups = new Map<string, Array<{ id: string; is_demo: number }>>();
     for (const row of rows) {

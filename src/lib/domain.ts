@@ -13,6 +13,8 @@ export type AgentState = "idle" | "running" | "waiting" | "failed" | "succeeded"
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "stopped";
 export type ExecutionMode = "demo" | "live";
 export type ActivityTone = "cyan" | "amber" | "violet" | "rose" | "red" | "green" | "slate";
+export type RunCostSource = "pending" | "sdk" | "catalog" | "unavailable";
+export type TaskCostStatus = "not_started" | "pending" | "available" | "partial" | "unavailable";
 
 export interface RunCheck {
   name: string;
@@ -48,6 +50,8 @@ export interface Task {
   title: string;
   description: string;
   estimatedCostUsd: number;
+  actualCostUsd: number | null;
+  actualCostStatus: TaskCostStatus;
   status: TaskStatus;
   priority: 1 | 2 | 3 | 4;
   labels: string[];
@@ -76,6 +80,14 @@ export interface AgentRun {
   finishedAt: string | null;
   error: string | null;
   executionMode: ExecutionMode;
+  providerId: string;
+  modelId: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  actualCostUsd: number | null;
+  costSource: RunCostSource;
   isActive: boolean;
   commitSha: string | null;
   changedFiles: string[];
@@ -132,6 +144,11 @@ export function formatRelativeTime(value: string) {
 
 export function formatEstimatedCost(value: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+}
+
+export function formatActualCost(value: number) {
+  if (value > 0 && value < 0.01) return `$${value.toFixed(6)}`;
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 6 }).format(value);
 }
 
 export function getInitials(name: string) {
