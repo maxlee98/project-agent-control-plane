@@ -47,6 +47,7 @@ export interface Task {
   issueNumber: number | null;
   title: string;
   description: string;
+  estimatedCostUsd: number;
   status: TaskStatus;
   priority: 1 | 2 | 3 | 4;
   labels: string[];
@@ -127,6 +128,10 @@ export function formatRelativeTime(value: string) {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
   return `${Math.floor(hours / 24)}d ago`;
+}
+
+export function formatEstimatedCost(value: number) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
 }
 
 export function getInitials(name: string) {

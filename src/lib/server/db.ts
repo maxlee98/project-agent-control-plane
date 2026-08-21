@@ -40,6 +40,7 @@ function createDatabase() {
       issue_number INTEGER,
       title TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
+      estimated_cost_cents INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'inbox',
       priority INTEGER NOT NULL DEFAULT 3,
       labels_json TEXT NOT NULL DEFAULT '[]',
@@ -102,6 +103,9 @@ function createDatabase() {
   if (!existingColumns.has("commit_sha")) database.exec("ALTER TABLE runs ADD COLUMN commit_sha TEXT");
   if (!existingColumns.has("changed_files_json")) database.exec("ALTER TABLE runs ADD COLUMN changed_files_json TEXT NOT NULL DEFAULT '[]'");
   if (!existingColumns.has("checks_json")) database.exec("ALTER TABLE runs ADD COLUMN checks_json TEXT NOT NULL DEFAULT '[]'");
+
+  const taskColumns = database.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
+  if (!new Set(taskColumns.map((column) => column.name)).has("estimated_cost_cents")) database.exec("ALTER TABLE tasks ADD COLUMN estimated_cost_cents INTEGER NOT NULL DEFAULT 0");
 
   const projectColumns = database.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>;
   if (!new Set(projectColumns.map((column) => column.name)).has("is_demo")) database.exec("ALTER TABLE projects ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0");

@@ -48,6 +48,7 @@ export function mapTask(row: TaskRow): Task {
     issueNumber: row.issue_number === null ? null : Number(row.issue_number),
     title: String(row.title),
     description: String(row.description ?? ""),
+    estimatedCostUsd: Number(row.estimated_cost_cents ?? 0) / 100,
     status: row.status as TaskStatus,
     priority: Number(row.priority) as Task["priority"],
     labels: fromJson(row.labels_json),
@@ -199,13 +200,13 @@ export function createProject(input: { fullName: string; localPath: string; desc
   return mapProject(db.prepare("SELECT * FROM projects WHERE id = ?").get(id) as ProjectRow);
 }
 
-export function createTask(input: { projectId: string; title: string; description?: string; status?: TaskStatus; priority?: number; labels?: string[]; issueNumber?: number; githubUrl?: string | null }) {
+export function createTask(input: { projectId: string; title: string; description?: string; estimatedCostCents?: number; status?: TaskStatus; priority?: number; labels?: string[]; issueNumber?: number; githubUrl?: string | null }) {
   const now = isoNow();
   const id = `task-${randomUUID()}`;
   db.prepare(`
-    INSERT INTO tasks (id, project_id, issue_number, title, description, status, priority, labels_json, assignee, agent_state, current_summary, github_url, updated_at, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 'idle', ?, ?, ?, ?)
-  `).run(id, input.projectId, input.issueNumber ?? null, input.title, input.description ?? "", input.status ?? "inbox", input.priority ?? 3, json(input.labels), "New task — ready for context.", input.githubUrl ?? null, now, now);
+    INSERT INTO tasks (id, project_id, issue_number, title, description, estimated_cost_cents, status, priority, labels_json, assignee, agent_state, current_summary, github_url, updated_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'idle', ?, ?, ?, ?)
+  `).run(id, input.projectId, input.issueNumber ?? null, input.title, input.description ?? "", input.estimatedCostCents ?? 0, input.status ?? "inbox", input.priority ?? 3, json(input.labels), "New task — ready for context.", input.githubUrl ?? null, now, now);
   addActivity({ projectId: input.projectId, taskId: id, type: "task", title: "Task created", detail: input.title, tone: "cyan" });
   return getTask(id);
 }
@@ -218,14 +219,14 @@ export function upsertSyncedTask(input: { projectId: string; issueNumber: number
   return getTask(existing.id);
 }
 
-export function updateTask(taskId: string, input: { status?: TaskStatus; priority?: number; title?: string; description?: string; summary?: string; agentState?: Task["agentState"]; branchName?: string | null; prUrl?: string | null }) {
+export function updateTask(taskId: string, input: { status?: TaskStatus; priority?: number; title?: string; description?: string; estimatedCostCents?: number; summary?: string; agentState?: Task["agentState"]; branchName?: string | null; prUrl?: string | null }) {
   const task = getTask(taskId);
   if (!task) return null;
   const provided = Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
-  const next = { ...task, ...provided, updatedAt: isoNow() };
+  const next = { ...task, ...provided, estimatedCostUsd: input.estimatedCostCents === undefined ? task.estimatedCostUsd : input.estimatedCostCents / 100, updatedAt: isoNow() };
   db.prepare(`
-    UPDATE tasks SET title = ?, description = ?, status = ?, priority = ?, agent_state = ?, current_summary = ?, branch_name = ?, pr_url = ?, updated_at = ? WHERE id = ?
-  `).run(next.title, next.description, next.status, next.priority, next.agentState, next.currentSummary, next.branchName, next.prUrl, next.updatedAt, taskId);
+    UPDATE tasks SET title = ?, description = ?, estimated_cost_cents = ?, status = ?, priority = ?, agent_state = ?, current_summary = ?, branch_name = ?, pr_url = ?, updated_at = ? WHERE id = ?
+  `).run(next.title, next.description, Math.round(next.estimatedCostUsd * 100), next.status, next.priority, next.agentState, next.currentSummary, next.branchName, next.prUrl, next.updatedAt, taskId);
   return getTask(taskId);
 }
 
