@@ -142,7 +142,7 @@ issue cleanup is required.
 - [x] Focused issue-template test passed
 - [x] Full tests and typecheck passed
 - [ ] Production build passed (existing prerender failure remains; see validation results)
-- [ ] Handoff and PR linkage verified
+- [x] Handoff and PR linkage verified
 
 ## Validation results
 
@@ -158,5 +158,7 @@ issue cleanup is required.
   issue creation is disabled in `.github/ISSUE_TEMPLATE/config.yml`.
 - No existing issue bodies, runtime API behavior, database schema, credentials, or remote state were
   changed.
-- Canonical task linkage is Issue #19; PR creation remains pending the required remote write and
-  human-review handoff.
+- Canonical task linkage is Issue #19; human review and merge approval remain pending.
+- Pull request #30 is open at https://github.com/maxlee98/project-agent-control-plane/pull/30 with
+  base `main`, head `agent/19-Create-a-template-for-issues-creat-bd5aff1d`, and a verified template
+  body. It has not been merged.
