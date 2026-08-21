@@ -90,7 +90,15 @@ async function executeLiveRun(runId: string, taskId: string, sourceRunId?: strin
     updateRun(runId, { status: "completed", progress: 100, currentActivity: "Pull request ready for review", finishedAt: new Date().toISOString() });
     addRunEvent(runId, "handoff_complete", "Pull request created", pr.url);
     addActivity({ projectId: project.id, taskId: task.id, runId, type: "pull_request", title: "Live PR ready for review", detail: `${handoff.changedFiles.length} changed files · ${handoff.sha.slice(0, 8)}`, tone: "violet" });
-    if (task.issueNumber) await publishComment(project.fullName, task.issueNumber, `Agent handoff is ready.\n\nPR: ${pr.url}\nCommit: ${handoff.sha}\nChanged files: ${handoff.changedFiles.length}\nChecks: ${checked.filter((check) => check.status === "passed").length}/${checked.length} passed.`);
+    if (task.issueNumber) {
+      try {
+        await publishComment(project.fullName, task.issueNumber, `Agent handoff is ready.\n\nPR: ${pr.url}\nCommit: ${handoff.sha}\nChanged files: ${handoff.changedFiles.length}\nChecks: ${checked.filter((check) => check.status === "passed").length}/${checked.length} passed.`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "The Issue handoff comment could not be published.";
+        addRunEvent(runId, "handoff_comment_failed", "Pull request ready; Issue update failed", message);
+        addActivity({ projectId: project.id, taskId: task.id, runId, type: "handoff_warning", title: "Pull request ready; Issue update failed", detail: message, tone: "amber" });
+      }
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Live agent failed unexpectedly.";
     const failedRun = getRun(runId);

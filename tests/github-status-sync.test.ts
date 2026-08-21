@@ -12,6 +12,8 @@ let statusName = "Done";
 let addedIssue = false;
 let issueListing: Array<Record<string, unknown>> = [];
 let projectItemVisibilityDelay = 0;
+let openPullRequests: Array<Record<string, unknown>> = [];
+let pullRequestPostConflict = false;
 
 function response(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -74,7 +76,15 @@ globalThis.fetch = async (input, init) => {
     } });
   }
 
-  if (url.endsWith("/pulls") && method === "POST") return response({ number: 42, html_url: "https://github.com/maxlee98/project-agent-control-plane/pull/42" });
+  if (url.includes("/pulls?") && method === "GET") return response(openPullRequests);
+  if (url.endsWith("/pulls") && method === "POST") {
+    if (pullRequestPostConflict) {
+      pullRequestPostConflict = false;
+      openPullRequests = [{ number: 43, html_url: "https://github.com/maxlee98/project-agent-control-plane/pull/43" }];
+      return response({ message: "Validation Failed" }, 422);
+    }
+    return response({ number: 42, html_url: "https://github.com/maxlee98/project-agent-control-plane/pull/42" });
+  }
   if (url.endsWith("/issues/10") && method === "GET") return response({ number: 10, node_id: "issue-node-10", html_url: "https://github.com/maxlee98/project-agent-control-plane/issues/10", title: "Task #10", state: issueState });
   if (url.endsWith("/issues/10") && method === "PATCH") {
     issueState = (body?.state as "open" | "closed") ?? issueState;
@@ -167,6 +177,8 @@ test("adds a newly created Issue to Projects V2 exactly once", async () => {
 
 test("creates a PR with an explicit non-closing canonical Issue reference", async () => {
   calls.length = 0;
+  openPullRequests = [];
+  pullRequestPostConflict = false;
   const now = new Date().toISOString();
   const task = {
     id: "task-10",
@@ -219,6 +231,34 @@ test("creates a PR with an explicit non-closing canonical Issue reference", asyn
   const pullRequest = calls.find((call) => call.url.endsWith("/pulls") && call.method === "POST");
   assert.match(String(pullRequest?.body?.body), /Refs #10/);
   assert.doesNotMatch(String(pullRequest?.body?.body), /\b(?:Closes|Fixes|Resolves)\b/i);
+});
+
+test("reuses an existing open PR when a retry reaches the same task branch", async () => {
+  calls.length = 0;
+  openPullRequests = [{ number: 41, html_url: "https://github.com/maxlee98/project-agent-control-plane/pull/41" }];
+  pullRequestPostConflict = false;
+  const task = { issueNumber: 10, title: "Task #10", currentSummary: "Validated implementation.", branchName: "agent/task-10" } as Task;
+  const run = { branchName: "agent/task-10", commitSha: "abc123" } as AgentRun;
+
+  const result = await github.createPullRequest(project().fullName, task, run);
+
+  assert.deepEqual(result, { number: 41, url: "https://github.com/maxlee98/project-agent-control-plane/pull/41" });
+  assert.equal(calls.some((call) => call.url.endsWith("/pulls") && call.method === "POST"), false);
+  assert.equal(calls.some((call) => call.url.includes("/pulls?") && call.method === "GET"), true);
+});
+
+test("recovers an existing PR when GitHub reports a duplicate-create validation error", async () => {
+  calls.length = 0;
+  openPullRequests = [];
+  pullRequestPostConflict = true;
+  const task = { issueNumber: 10, title: "Task #10", currentSummary: "Validated implementation.", branchName: "agent/task-10" } as Task;
+  const run = { branchName: "agent/task-10", commitSha: "abc123" } as AgentRun;
+
+  const result = await github.createPullRequest(project().fullName, task, run);
+
+  assert.deepEqual(result, { number: 43, url: "https://github.com/maxlee98/project-agent-control-plane/pull/43" });
+  assert.equal(calls.filter((call) => call.url.endsWith("/pulls") && call.method === "POST").length, 1);
+  assert.equal(calls.filter((call) => call.url.includes("/pulls?") && call.method === "GET").length, 2);
 });
 
 test("refuses to create a PR without a canonical GitHub Issue", async () => {
