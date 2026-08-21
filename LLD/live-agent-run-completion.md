@@ -2,7 +2,7 @@
 
 ## Status
 
-- **Status:** Implementation complete; PR handoff pending
+- **Status:** Complete; PR #39 open for human review
 - **Owner:** Project Agent Control Plane
 - **Date:** 2026-08-22
 - **Related task or issue:** GitHub Issue #36 — [Diagnose and make live agent runs complete successfully](https://github.com/maxlee98/project-agent-control-plane/issues/36)
@@ -196,6 +196,9 @@ SQLite state are not deleted by rollback.
 - Live verification: the bounded procedure is documented in `docs/architecture.md` and the
   network-free mocked end-to-end path passed. A real provider/GitHub run was not executed because
   live credentials and a target checkout were not explicitly provided for this handoff.
+- PR handoff: PR #39 is open against `main` from `fix/36-live-run-completion`, contains the required
+  `Fixes #36` linkage and canonical template headings, and passed the remote freshness check before
+  creation. Human review and merge remain pending.
 
 ## Completion checklist
 
@@ -205,4 +208,4 @@ SQLite state are not deleted by rollback.
 - [x] Mocked successful/failure-boundary tests added
 - [x] Tests, typecheck, build, and diff checks passed
 - [x] Live-run verification procedure documented or executed
-- [ ] Dedicated branch and PR handoff verified
+- [x] Dedicated branch and PR handoff verified
