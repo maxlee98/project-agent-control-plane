@@ -2,6 +2,7 @@
 
 This project follows the global `terminal-reliability` skill in `~/.agents/skills/terminal-reliability/SKILL.md`.
 For Live-mode operations, also follow `.agents/skills/control-plane-live-ops/SKILL.md`.
+For model requests with repository context, also follow `.agents/skills/content-size-protection/SKILL.md`.
 
 The repository also has an enforced hard-stop runner. Agent-authored development commands MUST use:
 
@@ -14,6 +15,16 @@ and terminates timed-out process groups.
 
 The purpose is to keep agent work recoverable when a shell command, dev server, package install, or
 remote GitHub request is interrupted.
+
+## Model request size
+
+Follow the `content-size-protection` skill before starting or continuing a Cline/LLM request. Measure
+the complete assembled context—including system instructions, workflow text, task context, history,
+tool definitions, and tool output—before submission. Prefer targeted excerpts and compact
+checkpoints over full repository dumps, and remeasure after reduction or chunking. Treat the
+OpenRouter `403 Request blocked by content filter: Request content exceeds maximum size for content
+filtering` response as an oversized request: preserve state, reduce the payload, and retry at most
+once with a newly measured request. Never log the prompt, raw tool output, `.env.local`, or secrets.
 
 ## Rules for this repository
 
