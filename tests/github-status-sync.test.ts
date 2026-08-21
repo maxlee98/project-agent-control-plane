@@ -175,7 +175,7 @@ test("adds a newly created Issue to Projects V2 exactly once", async () => {
   assert.equal(calls.filter((call) => String(call.body?.query).includes("addProjectV2ItemById")).length, 1);
 });
 
-test("creates a PR with an explicit non-closing canonical Issue reference", async () => {
+test("creates a PR with one explicit closing canonical Issue reference", async () => {
   calls.length = 0;
   openPullRequests = [];
   pullRequestPostConflict = false;
@@ -229,8 +229,11 @@ test("creates a PR with an explicit non-closing canonical Issue reference", asyn
   const result = await github.createPullRequest(project().fullName, task, run);
   assert.deepEqual(result, { number: 42, url: "https://github.com/maxlee98/project-agent-control-plane/pull/42" });
   const pullRequest = calls.find((call) => call.url.endsWith("/pulls") && call.method === "POST");
-  assert.match(String(pullRequest?.body?.body), /Refs #10/);
-  assert.doesNotMatch(String(pullRequest?.body?.body), /\b(?:Closes|Fixes|Resolves)\b/i);
+  const pullRequestBody = String(pullRequest?.body?.body);
+  assert.match(pullRequestBody, /\bFixes #10\b/);
+  assert.equal(pullRequestBody.match(/#10/g)?.length, 1);
+  assert.doesNotMatch(pullRequestBody, /\b(?:Refs|Closes|Resolves)\b/i);
+  assert.doesNotMatch(pullRequestBody, /Automated handoff for task/i);
 });
 
 test("reuses an existing open PR when a retry reaches the same task branch", async () => {

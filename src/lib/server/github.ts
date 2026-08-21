@@ -319,7 +319,7 @@ export async function createPullRequest(fullName: string, task: Task, run: Agent
   const existing = await findOpenPullRequest(owner, repo, head, base);
   if (existing) return existing;
 
-  const response = await githubRequest(`/repos/${owner}/${repo}/pulls`, { method: "POST", body: JSON.stringify({ title: task.title, head, base, body: `Refs #${task.issueNumber}\n\nAutomated handoff for task #${task.issueNumber}.\n\n${task.currentSummary}\n\nCommit: ${run.commitSha ?? "not recorded"}` }) });
+  const response = await githubRequest(`/repos/${owner}/${repo}/pulls`, { method: "POST", body: JSON.stringify({ title: task.title, head, base, body: `Fixes #${task.issueNumber}\n\n${task.currentSummary}\n\nCommit: ${run.commitSha ?? "not recorded"}` }) });
   if (response.status === 422) {
     const createdByRetry = await findOpenPullRequest(owner, repo, head, base);
     if (createdByRetry) return createdByRetry;

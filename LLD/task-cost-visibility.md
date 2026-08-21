@@ -2,7 +2,7 @@
 
 ## Status
 
-- **Status:** Repair implemented; pending human review and merge
+- **Status:** Repair and handoff-linkage correction implemented; pending human review and merge
 - **Owner:** Project Agent Control Plane
 - **Date:** 2026-08-21
 - **Related task or issue:** [Issue #21](https://github.com/maxlee98/project-agent-control-plane/issues/21) — “There should be an associated cost for each task.”
@@ -66,6 +66,8 @@ this handoff boundary so a task retains the usage captured before the optional c
 - `src/lib/server/cost.ts` — exact USD parsing and provider/model usage pricing helpers.
 - `src/lib/server/cline.ts` — translates Cline usage into the normalized run accounting record.
 - `src/lib/server/github.ts` — idempotent PR lookup/recovery during the final handoff.
+- `.github/pull_request_template.md`, `scripts/pr-template.mjs`, and repository workflow guidance —
+  require explicit `Fixes`/`Closes` Issue linkage for the review handoff.
 - `src/lib/server/orchestrator.ts` — persists usage after normal, failed, and stopped live runs;
   keeps a completed, cost-bearing handoff completed when the optional Issue comment fails and records
   the warning in run/activity history.
@@ -145,6 +147,8 @@ cost” so neither is confused with the other.
 - 2026-08-21: A live Task #21 run failed after PR creation because the final Issue comment returned
   HTTP 422. Preserve completed run/cost state, record the comment failure as a warning, and make PR
   creation idempotent for retries.
+- 2026-08-21: Generated implementation PRs use one `Fixes #<issue-number>` token, matching the
+  repository’s closing-linkage policy and avoiding duplicate Issue mentions in the handoff body.
 
 ## Open questions and assumptions
 
@@ -156,16 +160,19 @@ cost” so neither is confused with the other.
 ## Validation results
 
 - `node --experimental-strip-types --experimental-loader ./tests/extensionless-loader.mjs --test tests/task-cost.test.ts`: passed; 5 tests passed, 0 failed.
-- `node --experimental-strip-types --experimental-loader ./tests/extensionless-loader.mjs --test tests/github-status-sync.test.ts`: passed; 10 tests passed, 0 failed, including existing-PR reuse and duplicate-create recovery.
-- `npm test`: passed; 33 tests passed, 0 failed.
+- `node --experimental-strip-types --experimental-loader ./tests/extensionless-loader.mjs --test tests/github-status-sync.test.ts`: passed; 10 tests passed, 0 failed, including closing Issue linkage, existing-PR reuse, and duplicate-create recovery.
+- `npm test`: passed; 35 tests passed, 0 failed.
 - `npm run typecheck`: passed.
 - `npm run build`: passed; all routes compiled and prerendered. The existing Turbopack NFT tracing
   warning remains; no task-cost-specific warning was reported.
+- `node scripts/verify-hard-stop.mjs`: passed.
 - `git diff --check`: passed.
 - Security requirement: no credentials, billing API calls, or sensitive raw usage payloads may be
   persisted or added to GitHub comments.
 - Handoff repair requirement: a failed optional Issue comment must not replace a completed run’s
   persisted provider/model/token/cost snapshot or task aggregation.
+- Handoff linkage requirement: the existing PR must be updated with a template-compliant `Fixes #21`
+  reference and verified by GitHub as closing canonical Issue #21.
 
 ## Completion checklist
 
@@ -175,3 +182,5 @@ cost” so neither is confused with the other.
 - [x] Tests, typecheck, build, and diff checks rerun for the repair
 - [x] Documentation updated
 - [x] Original implementation handoff verified: commit `d3bc890e0ccb6a9459dc8a0097d1e003c371fe0d`, branch `agent/21-There-should-be-an-associated-cost-a2d20ec9`, PR #31 merged at https://github.com/maxlee98/project-agent-control-plane/pull/31; the observed post-handoff 422 repair is covered on the follow-up branch
+- [x] Repository handoff policy corrected from `Refs` to explicit `Fixes`/`Closes` linkage
+- [ ] Existing PR #34 updated and verified with GitHub closing Issue #21

@@ -22,9 +22,10 @@ security, and repository/framework conventions. Fix findings or record them as L
 
 - Work on a dedicated branch; never push directly to `main`.
 - Create and update PRs only through the template-validating `scripts/create-pr.mjs` flow.
-- Every implementation PR MUST link one canonical GitHub Issue for the task. Include an explicit
-  non-closing reference such as `Refs #123` or a full Issue URL in the PR body; an LLD link alone is
-  not sufficient.
+- Every implementation PR MUST explicitly link one canonical GitHub Issue for the task with
+  `Fixes #123` or `Closes #123`; an LLD link, URL, or ordinary Issue mention alone is not sufficient.
+  The closing keyword intentionally creates the GitHub Development relationship and closes the Issue
+  when the PR merges.
 - Keep the GitHub Project board Issue-only: the PR is a linked implementation artifact of the Issue,
   not a second Project task item. Never add the PR separately unless a task-specific LLD explicitly
   changes that policy.
