@@ -129,4 +129,4 @@ that distinction clear.
 - [x] Implementation self-review completed
 - [x] Tests and typecheck passed; build reached prerendering but failed on an existing global-error/runtime issue
 - [x] Documentation updated
-- [x] Handoff verified locally; PR creation remains pending because the feature branch has not been pushed
+- [x] Handoff verified: commit `f1d7ac59fa683f4b07f77bfb6553655628585b58`, branch pushed, PR #31 open at https://github.com/maxlee98/project-agent-control-plane/pull/31
