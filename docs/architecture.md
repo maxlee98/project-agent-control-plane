@@ -47,6 +47,31 @@ The Cline implementation should use `ClineCore`, subscribe to `agent_event` mess
 them into the stable run event vocabulary, and always dispose the session. GitHub writes should be
 performed by a host-side adapter rather than passing the raw token into the child agent process.
 
+## Live-run verification procedure
+
+When validating a real Live run, keep credentials host-side and use bounded, separate checks:
+
+1. Confirm `git status --short --branch`, `git worktree list --porcelain`, and the expected
+   `origin/main` before starting. Do not print `.env.local` or process environments.
+2. Start the app in the operator's terminal with `EXECUTION_MODE=live`; query readiness with
+   `curl --connect-timeout 2 --max-time 5 --fail --silent --show-error
+   http://127.0.0.1:3000/api/dashboard`. Require `runtime.executionMode` to be `live` and
+   `runtime.liveReady` to be `true` before starting a task.
+3. Start one Issue-linked task and poll its run API with a bounded `curl --max-time` request. Check
+   that the run emits stage events for workspace, Cline, validation, Git, and PR boundaries, and
+   that `isActive` is true only while the current process owns the Cline session.
+4. For success, require persisted `status=completed`, `progress=100`, `commitSha`, changed files,
+   passed checks, a verified PR URL, and task state `agent_review`. An Issue-comment failure after
+   the PR must appear as a warning without changing those completed states.
+5. For failure or operator stop, require the stage-specific redacted error, preserved workspace
+   path, and truthful `failed`/`stopped` state. Query Git and GitHub before retrying any interrupted
+   side effect.
+6. Stop the app through the operator's terminal, verify no unexpected process/listener remains, and
+   retain a concise checkpoint of the observed stage and outcome.
+
+The network-free `tests/live-run.test.ts` suite provides the deterministic counterpart to this
+procedure using injected adapters and temporary SQLite state; it never calls a provider or GitHub.
+
 ## Data migration path
 
 SQLite is intentionally behind a small repository module. The hosted migration is:

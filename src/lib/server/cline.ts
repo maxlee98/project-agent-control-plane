@@ -9,6 +9,14 @@ export interface ClineCallbacks {
   onUsage?(usage: RunUsageSnapshot): void;
 }
 
+type ClineFinishReason = "completed" | "aborted" | "error" | "mistake_limit" | "max_iterations";
+type ClineCompletion = { text: string; finishReason: ClineFinishReason; usage?: Partial<RunUsageSnapshot> };
+type ClineCreateOptions = Parameters<typeof ClineCore.create>[0];
+
+export interface ClineRuntimeDependencies {
+  createCore?: (options?: ClineCreateOptions) => Promise<ClineCore>;
+}
+
 const activeSessions = new Map<string, { cline: ClineCore; sessionId: string }>();
 
 export function hasActiveClineSession(runId: string) {
@@ -24,6 +32,32 @@ function timeoutError(label: string) {
   return new Error(`Cline ${label} timeout. The run was stopped and its workspace was preserved.`);
 }
 
+function safeErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return redactSecrets(message) ?? "Cline reported an unknown error.";
+}
+
+function normalizeFinishReason(value: unknown): ClineFinishReason {
+  if (value === "completed" || value === "aborted" || value === "error" || value === "mistake_limit" || value === "max_iterations") return value;
+  return "error";
+}
+
+function unsuccessfulCompletionError(completion: ClineCompletion) {
+  return new Error(`Cline run did not complete successfully (finish reason: ${completion.finishReason}).`);
+}
+
+async function abortAndStopSession(cline: ClineCore, sessionId: string, reason: Error) {
+  if (!sessionId) {
+    await cline.dispose();
+    return;
+  }
+  try {
+    await cline.abort(sessionId, reason);
+  } finally {
+    await cline.stop(sessionId);
+  }
+}
+
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string, onTimeout: () => void) {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -37,8 +71,9 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string, o
   });
 }
 
-export async function runCline(input: AgentRunInput & { runId: string; providerId?: string; modelId?: string }, callbacks: ClineCallbacks) {
-  const cline = await ClineCore.create({ clientName: "project-agent-control-plane", backendMode: "local" });
+export async function runCline(input: AgentRunInput & { runId: string; providerId?: string; modelId?: string }, callbacks: ClineCallbacks, dependencies: ClineRuntimeDependencies = {}) {
+  const createCore = dependencies.createCore ?? ClineCore.create;
+  const cline = await createCore({ clientName: "project-agent-control-plane", backendMode: "local" });
   const providerId = input.providerId ?? process.env.CLINE_PROVIDER_ID ?? "anthropic";
   const modelId = input.modelId ?? process.env.CLINE_MODEL_ID ?? "claude-sonnet-4-5";
   let sessionId = "";
@@ -47,9 +82,9 @@ export async function runCline(input: AgentRunInput & { runId: string; providerI
   let timedOut = false;
   const maxDurationMs = durationFromEnv("AGENT_MAX_RUN_MINUTES", 45);
   const inactivityMs = durationFromEnv("AGENT_INACTIVITY_MINUTES", 8);
-  let resolveEnded: (value: { text: string }) => void = () => undefined;
+  let resolveEnded: (value: ClineCompletion) => void = () => undefined;
   let rejectEnded: (reason: Error) => void = () => undefined;
-  const ended = new Promise<{ text: string }>((resolve, reject) => {
+  const ended = new Promise<ClineCompletion>((resolve, reject) => {
     resolveEnded = resolve;
     rejectEnded = reject;
   });
@@ -57,8 +92,7 @@ export async function runCline(input: AgentRunInput & { runId: string; providerI
     if (timedOut) return;
     timedOut = true;
     rejectEnded(error);
-    if (sessionId) void cline.stop(sessionId).catch(() => undefined);
-    else void cline.dispose().catch(() => undefined);
+    void abortAndStopSession(cline, sessionId, error).catch(() => undefined);
   };
   const reportUsage = async () => {
     if (!sessionId) return latestUsage;
@@ -76,13 +110,13 @@ export async function runCline(input: AgentRunInput & { runId: string; providerI
   }, Math.min(30_000, inactivityMs));
 
   const unsubscribe = cline.subscribe((event) => {
-    lastActivityAt = Date.now();
     const payload = event.payload as {
       sessionId?: string;
-      event?: { type?: string; text?: string; message?: string; toolName?: string; error?: Error };
+      event?: { type?: string; text?: string; message?: string; toolName?: string; error?: Error | string; reason?: string; usage?: Partial<RunUsageSnapshot> };
       chunk?: string;
     };
-    if (payload.sessionId && sessionId && payload.sessionId !== sessionId) return;
+    if (!payload.sessionId || !sessionId || payload.sessionId !== sessionId) return;
+    lastActivityAt = Date.now();
 
     if (event.type === "agent_event" && payload.event) {
       const agentEvent = payload.event as {
@@ -90,7 +124,8 @@ export async function runCline(input: AgentRunInput & { runId: string; providerI
         text?: string;
         message?: string;
         toolName?: string;
-        error?: Error;
+        error?: Error | string;
+        reason?: string;
         inputTokens?: number;
         outputTokens?: number;
         cacheReadTokens?: number;
@@ -114,7 +149,7 @@ export async function runCline(input: AgentRunInput & { runId: string; providerI
       };
       const detail = redactSecrets(
         agentEvent.type === "error"
-          ? agentEvent.error?.message
+          ? safeErrorMessage(agentEvent.error)
           : agentEvent.type === "content_end"
             ? agentEvent.text
             : agentEvent.type === "notice"
@@ -155,21 +190,21 @@ export async function runCline(input: AgentRunInput & { runId: string; providerI
             }
           }).catch(() => undefined);
         }
-        resolveEnded({ text: redactSecrets(agentEvent.text) ?? "" });
+        resolveEnded({ text: redactSecrets(agentEvent.text) ?? "", finishReason: normalizeFinishReason(agentEvent.reason), usage: agentEvent.usage });
       }
-      if (agentEvent.type === "error") rejectEnded(agentEvent.error instanceof Error ? agentEvent.error : new Error("Cline reported an error."));
+      if (agentEvent.type === "error") rejectEnded(new Error(safeErrorMessage(agentEvent.error)));
     } else if (event.type === "chunk" && payload.chunk) {
       callbacks.onEvent("chunk", "Agent output", redactSecrets(payload.chunk.slice(-1000)));
     } else if (event.type === "ended") {
-      resolveEnded({ text: "" });
+      resolveEnded({ text: "", finishReason: normalizeFinishReason((event.payload as { reason?: string }).reason) });
     }
   });
 
   try {
+    const deadline = Date.now() + maxDurationMs;
     const startPromise = cline.start({
       source: "cli",
       mode: "automation",
-      prompt: input.prompt,
       interactive: false,
       config: {
         providerId,
@@ -184,18 +219,26 @@ export async function runCline(input: AgentRunInput & { runId: string; providerI
         checkpoint: { enabled: true },
       },
     });
-    const deadline = Date.now() + maxDurationMs;
     const result = await withTimeout(startPromise, maxDurationMs, "startup", () => stopAfterTimeout(timeoutError("startup")));
-    sessionId = result.sessionId;
+    sessionId = result.sessionId.trim();
+    if (!sessionId) throw new Error("Cline startup returned no session ID.");
     activeSessions.set(input.runId, { cline, sessionId });
     callbacks.onEvent("session_started", "Cline session started", sessionId);
     const remainingMs = Math.max(1, deadline - Date.now());
-    const completion = await withTimeout(ended, remainingMs, "completion", () => stopAfterTimeout(timeoutError("completion")));
+    const sendResult = await withTimeout(cline.send({ sessionId, prompt: input.prompt, mode: "act" }), remainingMs, "completion", () => stopAfterTimeout(timeoutError("completion")));
+    const completion: ClineCompletion = sendResult
+      ? { text: redactSecrets(sendResult.text) ?? "", finishReason: normalizeFinishReason(sendResult.finishReason), usage: sendResult.usage }
+      : await withTimeout(ended, remainingMs, "completion", () => stopAfterTimeout(timeoutError("completion")));
+    if (completion.usage) {
+      latestUsage = await readRunUsage(providerId, modelId, completion.usage) ?? latestUsage;
+      if (latestUsage) callbacks.onUsage?.(latestUsage);
+    }
+    if (completion.finishReason !== "completed") throw unsuccessfulCompletionError(completion);
     await reportUsage();
     return { sessionId, ...completion, usage: latestUsage };
   } catch (error) {
     await reportUsage();
-    throw error;
+    throw new Error(safeErrorMessage(error));
   } finally {
     clearInterval(watchdog);
     activeSessions.delete(input.runId);
@@ -207,6 +250,5 @@ export async function runCline(input: AgentRunInput & { runId: string; providerI
 export async function stopClineRun(runId: string) {
   const active = activeSessions.get(runId);
   if (!active) return;
-  if (active.sessionId) await active.cline.stop(active.sessionId);
-  else await active.cline.dispose();
+  await abortAndStopSession(active.cline, active.sessionId, new Error("Cline run stopped by operator."));
 }
