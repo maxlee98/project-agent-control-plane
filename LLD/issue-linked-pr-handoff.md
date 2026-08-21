@@ -2,7 +2,7 @@
 
 ## Status
 
-- **Status:** Complete; explicit closing-linkage follow-up in progress
+- **Status:** Complete; PR #33 open pending human review
 - **Owner:** Project Agent Control Plane
 - **Date:** 2026-08-21
 - **Related task or issue:** https://github.com/maxlee98/project-agent-control-plane/issues/28
@@ -147,6 +147,10 @@ or Issue is deleted by this change.
   `fix/issue-linked-pr-handoff`, and URL `https://github.com/maxlee98/project-agent-control-plane/pull/29`.
 - Historical PR #29 body template verification: passed and contains the former non-closing `Refs #28`
   linkage.
+- PR #33 remote verification: passed with state `open`, base `main`, head
+  `fix/explicit-pr-issue-link`, and URL `https://github.com/maxlee98/project-agent-control-plane/pull/33`.
+- PR #33 body template verification: passed; the body contains exactly one `Fixes #21` token, and
+  GitHub parsed its `closingIssuesReferences` as canonical Issue #21.
 - No Project PR item was created: the PR handoff uses the Pull Requests API only, and the Project
   integration path/tests add and reconcile Issues only.
 - Follow-up implementation validation: the generated body now contains one `Fixes #<issue>` token;
@@ -184,4 +188,5 @@ or Issue is deleted by this change.
 - [x] Tests, typecheck, build, and diff checks passed
 - [x] LLD and handoff documentation updated
 - [x] Tracking Issue #28 and PR #29 linkage verified
+- [x] Follow-up PR #33 linkage to canonical Issue #21 verified
 - [ ] Human review and merge approval remain pending
