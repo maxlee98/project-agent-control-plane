@@ -2,10 +2,10 @@
 
 ## Status
 
-- **Status:** Blocked for PR handoff; implementation complete pending a canonical tracking Issue
+- **Status:** In progress; implementation complete and Issue #28 available for PR handoff
 - **Owner:** Project Agent Control Plane
 - **Date:** 2026-08-21
-- **Related task or issue:** User request: every future pull request must link to its canonical GitHub Issue while the Projects board remains Issue-only.
+- **Related task or issue:** https://github.com/maxlee98/project-agent-control-plane/issues/28
 
 ## Problem and observed evidence
 
@@ -140,8 +140,7 @@ or Issue is deleted by this change.
 
 ## Open questions and assumptions
 
-- A canonical tracking Issue number is needed for the policy change’s own PR handoff; none was
-  supplied in the request, so no number will be guessed.
+- Issue #28 is the canonical tracking Issue for this policy change and must be referenced by its PR.
 - Assumption: normal Live task creation creates and persists a repository Issue before the agent can
   reach PR handoff.
 - Open question: whether a future GitHub App/webhook should automatically reject or label manually
@@ -155,5 +154,5 @@ or Issue is deleted by this change.
 - [x] Runtime PR guard/link updated
 - [x] Tests, typecheck, build, and diff checks passed
 - [x] LLD and handoff documentation updated
-- [ ] Tracking Issue and PR linkage verified
-- [ ] Human review and merge approval remain pending after a tracking Issue is supplied
+- [x] Tracking Issue identified as #28; PR linkage pending remote creation and verification
+- [ ] Human review and merge approval remain pending
