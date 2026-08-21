@@ -6,6 +6,7 @@ import { assertValidPrBody, readTemplate, validatePrBody } from "../scripts/pr-t
 const template = readTemplate();
 const validBody = template
   .replaceAll(/<!--.*?-->/gs, "")
+  .replace("- **Task:** ", "- **Task:** Refs #123 ")
   .replace("## UX evidence", "## UX evidence\n\nNot applicable: documentation and infrastructure change.")
   .replaceAll("- [ ] `npm test` — result:", "- [x] `npm test` — result: 15 passed")
   .replaceAll("- [ ] `npm run typecheck` — result:", "- [x] `npm run typecheck` — result: passed")
@@ -22,6 +23,12 @@ test("reports missing headings, unresolved comments, and unchecked validation", 
   assert.ok(errors.some((error) => error.includes("missing heading")));
   assert.ok(errors.includes("unresolved template comment remains"));
   assert.ok(errors.includes("validation result is not checked: npm test"));
+  assert.ok(errors.some((error) => error.includes("canonical GitHub Issue reference is missing")));
+});
+
+test("accepts a full GitHub Issue URL as the PR linkage", () => {
+  const body = validBody.replace("Refs #123", "https://github.com/example/repository/issues/123");
+  assert.doesNotThrow(() => assertValidPrBody(template, body));
 });
 
 test("template remains the single source of truth", () => {
