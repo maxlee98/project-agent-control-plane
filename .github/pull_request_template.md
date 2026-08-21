@@ -1,6 +1,6 @@
 ## Task and design references
 
-- **Task:** <!-- Link the control-plane task or GitHub issue. -->
+- **Task:** <!-- Required: link the canonical GitHub Issue/control-plane task and include `Refs #<issue-number>` or a full Issue URL. An LLD link alone is not sufficient. -->
 - **LLD:** <!-- Link `LLD/<task-slug>.md`; explain if this is a docs-only exception. -->
 - **PR type:** <!-- Feature / bug fix / refactor / docs / test / configuration / migration -->
 
