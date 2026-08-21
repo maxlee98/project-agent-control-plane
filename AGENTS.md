@@ -90,3 +90,7 @@ strategy force-pushes. A rebased published branch requires an explicit, separate
 Before changing code, read or create `LLD/<task-slug>.md`. On every context resumption, reread the
 LLD before making another design or code decision. Every change is branch-and-PR first; never push
 directly to `main`, and never merge automatically.
+Every PR must link one canonical GitHub Issue with `Refs #<number>` or a full Issue URL. The Issue
+is the sole task item on the Issue-only GitHub Project board; the PR is a linked implementation
+artifact and must not be added as a second board item. If no Issue identity is available, stop before
+PR creation rather than substituting a local task ID or inventing an Issue number.

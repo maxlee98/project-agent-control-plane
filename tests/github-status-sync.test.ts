@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
+import type { AgentRun, Task } from "../src/lib/domain.ts";
 
 process.env.GITHUB_TOKEN = "test-token";
 
@@ -68,6 +69,7 @@ globalThis.fetch = async (input, init) => {
     } });
   }
 
+  if (url.endsWith("/pulls") && method === "POST") return response({ number: 42, html_url: "https://github.com/maxlee98/project-agent-control-plane/pull/42" });
   if (url.endsWith("/issues/10") && method === "GET") return response({ state: issueState });
   if (url.endsWith("/issues/10") && method === "PATCH") {
     issueState = (body?.state as "open" | "closed") ?? issueState;
@@ -145,4 +147,60 @@ test("adds a newly created Issue to Projects V2 exactly once", async () => {
   const second = await github.ensureProjectItem(project(), { number: 14, url: "https://github.com/maxlee98/project-agent-control-plane/issues/14", nodeId: "issue-node-14" });
   assert.equal(second.projectChanged, false);
   assert.equal(calls.filter((call) => String(call.body?.query).includes("addProjectV2ItemById")).length, 1);
+});
+
+test("creates a PR with an explicit non-closing canonical Issue reference", async () => {
+  calls.length = 0;
+  const now = new Date().toISOString();
+  const task = {
+    id: "task-10",
+    projectId: "project-live",
+    issueNumber: 10,
+    title: "Task #10",
+    description: "",
+    status: "in_progress",
+    priority: 3,
+    labels: [],
+    assignee: null,
+    agentState: "succeeded",
+    currentSummary: "Validated implementation.",
+    branchName: "agent/task-10",
+    prUrl: null,
+    githubUrl: "https://github.com/maxlee98/project-agent-control-plane/issues/10",
+    updatedAt: now,
+    createdAt: now,
+  } satisfies Task;
+  const run = {
+    id: "run-10",
+    taskId: "task-10",
+    projectId: "project-live",
+    mode: "start",
+    status: "completed",
+    sessionId: null,
+    branchName: "agent/task-10",
+    workspacePath: null,
+    progress: 100,
+    currentActivity: "Pull request ready for review",
+    startedAt: now,
+    finishedAt: now,
+    error: null,
+    executionMode: "live",
+    isActive: false,
+    commitSha: "abc123",
+    changedFiles: [],
+    checks: [],
+  } satisfies AgentRun;
+  const result = await github.createPullRequest(project().fullName, task, run);
+  assert.deepEqual(result, { number: 42, url: "https://github.com/maxlee98/project-agent-control-plane/pull/42" });
+  const pullRequest = calls.find((call) => call.url.endsWith("/pulls") && call.method === "POST");
+  assert.match(String(pullRequest?.body?.body), /Refs #10/);
+  assert.doesNotMatch(String(pullRequest?.body?.body), /\b(?:Closes|Fixes|Resolves)\b/i);
+});
+
+test("refuses to create a PR without a canonical GitHub Issue", async () => {
+  calls.length = 0;
+  const task = { issueNumber: null, title: "Unlinked task", currentSummary: "", branchName: "agent/unlinked" } as Task;
+  const run = { branchName: "agent/unlinked", commitSha: "abc123" } as AgentRun;
+  await assert.rejects(() => github.createPullRequest(project().fullName, task, run), /canonical GitHub Issue/);
+  assert.equal(calls.some((call) => call.url.endsWith("/pulls") && call.method === "POST"), false);
 });
