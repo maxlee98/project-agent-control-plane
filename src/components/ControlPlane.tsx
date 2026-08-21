@@ -130,11 +130,14 @@ export default function ControlPlane() {
     if (!project) return;
     setSyncing(true);
     const response = await fetch(`/api/projects/${project.id}/sync`, { method: "POST" });
-    const result = await response.json().catch(() => ({})) as { error?: string; count?: number; imported?: number; updated?: number; repairedIssues?: number; mode?: string };
+    const result = await response.json().catch(() => ({})) as { error?: string; count?: number; imported?: number; updated?: number; repairedIssues?: number; createdIssues?: number; correctedIssues?: number; addedProjectItems?: number; mode?: string };
     setSyncing(false);
     if (!response.ok) { notify(result.error ?? "GitHub sync failed."); return; }
     const repairText = result.repairedIssues ? ` · repaired ${result.repairedIssues} issue${result.repairedIssues === 1 ? "" : "s"}` : "";
-    notify(result.mode === "demo" ? "Demo sync completed · no GitHub requests made" : `GitHub sync completed · ${result.count ?? 0} tasks (${result.imported ?? 0} imported, ${result.updated ?? 0} updated)${repairText}`);
+    const identityText = result.createdIssues || result.correctedIssues || result.addedProjectItems
+      ? ` · ${result.createdIssues ?? 0} Issues created, ${result.correctedIssues ?? 0} links corrected, ${result.addedProjectItems ?? 0} Project items added`
+      : "";
+    notify(result.mode === "demo" ? "Demo sync completed · no GitHub requests made" : `GitHub sync completed · ${result.count ?? 0} tasks (${result.imported ?? 0} imported, ${result.updated ?? 0} updated)${identityText}${repairText}`);
     await load();
   }
   if (loading) return <div className="flex min-h-screen items-center justify-center bg-[#101318] text-slate-500"><div className="flex items-center gap-3 text-sm"><Icon name="loader" className="animate-spin text-lime-300" />Warming up the control plane…</div></div>;

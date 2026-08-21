@@ -15,10 +15,10 @@ function repoParts(fullName: string) {
   return { owner, repo };
 }
 
-async function readResponse(response: Response) {
-  const body = await response.json().catch(() => ({})) as { message?: string };
+async function readResponse<T = Record<string, unknown>>(response: Response) {
+  const body = await response.json().catch(() => ({})) as T & { message?: string };
   if (!response.ok) throw new Error(`GitHub API ${response.status}: ${body.message ?? "request failed"}`);
-  return body as Record<string, unknown>;
+  return body as T;
 }
 
 async function graphql<T>(query: string, variables: Record<string, unknown>) {
@@ -42,6 +42,25 @@ function statusFromLabel(value: string | undefined): TaskStatus {
 }
 
 type StatusOption = { id: string; name: string };
+
+type IssueApiRecord = {
+  number?: number;
+  node_id?: string;
+  html_url?: string;
+  title?: string;
+  body?: string | null;
+  state?: "open" | "closed";
+  pull_request?: unknown;
+};
+
+export type ResolvedIssue = {
+  number: number;
+  url: string;
+  nodeId: string;
+  title: string;
+  body: string;
+  state: "open" | "closed";
+};
 
 export type SyncedProjectItem = {
   projectItemId: string;
@@ -204,7 +223,7 @@ export async function listProjectItems(project: Project): Promise<SyncedProjectI
   });
 }
 
-type CreatedIssue = { number: number; url: string; nodeId: string };
+export type CreatedIssue = { number: number; url: string; nodeId: string };
 
 export async function ensureProjectItem(project: Project, issue: CreatedIssue) {
   const existing = (await listProjectItems(project)).find((item) => item.issueNumber === issue.number || item.contentNodeId === issue.nodeId);
@@ -216,7 +235,12 @@ export async function ensureProjectItem(project: Project, issue: CreatedIssue) {
     }
   }`, { projectId: project.githubProjectId, contentId: issue.nodeId });
   if (!data.addProjectV2ItemById.item?.id) throw new Error(`GitHub Projects V2 did not return an item for issue #${issue.number}.`);
-  const item = (await listProjectItems(project)).find((candidate) => candidate.issueNumber === issue.number || candidate.contentNodeId === issue.nodeId);
+  let item: SyncedProjectItem | undefined;
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 2500));
+    item = (await listProjectItems(project)).find((candidate) => candidate.issueNumber === issue.number || candidate.contentNodeId === issue.nodeId);
+    if (item) break;
+  }
   if (!item) throw new Error(`Issue #${issue.number} was added remotely but could not be read back from GitHub Projects V2.`);
   return { projectChanged: true, item };
 }
@@ -253,12 +277,27 @@ export async function reconcileProjectItemLifecycle(project: Project, item: Sync
   return { issueChanged };
 }
 
-export async function reconcileTaskStatus(project: Project, issueNumber: number, status: TaskStatus) {
-  const item = (await listProjectItems(project)).find((candidate) => candidate.issueNumber === issueNumber);
-  if (!item) throw new Error(`Issue #${issueNumber} is not present in the configured GitHub Projects V2 board.`);
-  const projectChanged = await updateProjectItemStatus(project, item, status);
-  const issueChanged = await updateIssueState(project.fullName, issueNumber, issueStateForTaskStatus(status));
-  return { projectChanged, issueChanged };
+async function applyTaskStatus(project: Project, resolved: { issue: ResolvedIssue; created: boolean }, status: TaskStatus, originalTask?: Pick<Task, "issueNumber" | "githubUrl">) {
+  const ensured = await ensureProjectItem(project, resolved.issue);
+  const projectChanged = await updateProjectItemStatus(project, ensured.item, status);
+  const issueChanged = await updateIssueState(project.fullName, resolved.issue.number, issueStateForTaskStatus(status));
+  return {
+    projectChanged,
+    issueChanged,
+    issueNumber: resolved.issue.number,
+    githubUrl: resolved.issue.url,
+    issueCreated: resolved.created,
+    issueCorrected: originalTask ? originalTask.issueNumber !== resolved.issue.number || originalTask.githubUrl !== resolved.issue.url : false,
+    projectItemAdded: ensured.projectChanged,
+  };
+}
+
+export async function reconcileTaskStatus(project: Project, task: Pick<Task, "issueNumber" | "title" | "description" | "githubUrl">, status: TaskStatus) {
+  return applyTaskStatus(project, await resolveTaskIssue(project, task), status, task);
+}
+
+export async function reconcileResolvedTaskStatus(project: Project, issue: ResolvedIssue, status: TaskStatus) {
+  return applyTaskStatus(project, { issue, created: false }, status);
 }
 
 export async function createPullRequest(fullName: string, task: Task, run: AgentRun) {
@@ -277,5 +316,56 @@ export async function createIssue(fullName: string, title: string, body: string)
   const result = await readResponse(await githubRequest(`/repos/${owner}/${repo}/issues`, { method: "POST", body: JSON.stringify({ title, body }) }));
   const nodeId = String(result.node_id ?? "");
   if (!nodeId) throw new Error("GitHub created the Issue but did not return its node ID for Projects V2 insertion.");
-  return { number: Number(result.number), url: String(result.html_url), nodeId };
+  const number = Number(result.number);
+  const url = String(result.html_url ?? "");
+  if (!Number.isInteger(number) || !url) throw new Error("GitHub created the Issue but returned incomplete identity metadata.");
+  return { number, url, nodeId };
+}
+
+function normalizedIssueTitle(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function mapIssueRecord(record: IssueApiRecord): ResolvedIssue | null {
+  if (record.pull_request || !record.number || !record.node_id || !record.html_url) return null;
+  return {
+    number: record.number,
+    url: record.html_url,
+    nodeId: record.node_id,
+    title: record.title ?? "",
+    body: record.body ?? "",
+    state: record.state === "closed" ? "closed" : "open",
+  };
+}
+
+async function getIssueByNumber(fullName: string, issueNumber: number): Promise<ResolvedIssue | null> {
+  const { owner, repo } = repoParts(fullName);
+  const response = await githubRequest(`/repos/${owner}/${repo}/issues/${issueNumber}`);
+  if (response.status === 404) return null;
+  return mapIssueRecord(await readResponse<IssueApiRecord>(response));
+}
+
+async function findIssueByTitle(fullName: string, title: string): Promise<ResolvedIssue | null> {
+  const { owner, repo } = repoParts(fullName);
+  const expectedTitle = normalizedIssueTitle(title);
+  for (let page = 1; page <= 10; page += 1) {
+    const records = await readResponse<IssueApiRecord[]>(await githubRequest(`/repos/${owner}/${repo}/issues?state=all&per_page=100&page=${page}`));
+    const match = records.find((record) => !record.pull_request && normalizedIssueTitle(record.title ?? "") === expectedTitle);
+    if (match) return mapIssueRecord(match);
+    if (records.length < 100) break;
+  }
+  return null;
+}
+
+export async function resolveTaskIssue(project: Project, task: Pick<Task, "issueNumber" | "title" | "description" | "githubUrl">) {
+  const numberedIssue = task.issueNumber ? await getIssueByNumber(project.fullName, task.issueNumber) : null;
+  const numberedIssueMatches = numberedIssue
+    && (task.githubUrl === numberedIssue.url || normalizedIssueTitle(task.title) === normalizedIssueTitle(numberedIssue.title));
+  const issue = numberedIssueMatches ? numberedIssue : await findIssueByTitle(project.fullName, task.title);
+  if (issue) return { issue, created: false };
+  const created = await createIssue(project.fullName, task.title, task.description);
+  return {
+    issue: { ...created, title: task.title, body: task.description, state: "open" as const },
+    created: true,
+  };
 }
