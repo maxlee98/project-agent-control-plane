@@ -3,6 +3,7 @@ import path from "node:path";
 import { addActivity, addRunEvent, createRun, getProject, getRun, getTask, updateRun, updateTask } from "./repository";
 import { createPullRequest, publishComment } from "./github";
 import { runCline, stopClineRun } from "./cline";
+import { IssueCheckpointPublisher } from "./issue-checkpoints";
 import type { RunUsageSnapshot } from "./cost";
 import { commitAndPush, detectChecks, expandHome, prepareWorkspace, runChecks, type WorkspaceHandle } from "./workspaces";
 import { redactSecrets } from "./redaction";
@@ -110,7 +111,26 @@ export async function executeLiveRun(runId: string, taskId: string, sourceRunId?
     return;
   }
   let workspace: WorkspaceHandle | undefined;
+  const checkpoints = task.issueNumber ? new IssueCheckpointPublisher({
+    fullName: project.fullName,
+    issueNumber: task.issueNumber,
+    runId,
+    publishComment: dependencies.publishComment,
+    intervalMs: Number(process.env.AGENT_CHECKPOINT_INTERVAL_MINUTES) > 0 ? Number(process.env.AGENT_CHECKPOINT_INTERVAL_MINUTES) * 60_000 : undefined,
+    onFailure: (checkpoint, error) => {
+      const message = safeErrorMessage(error);
+      addRunEvent(runId, "issue_checkpoint_failed", `GitHub Issue checkpoint failed (${checkpoint.phase})`, message);
+      addActivity({ projectId: project.id, taskId: task.id, runId, type: "issue_checkpoint_failed", title: "GitHub Issue checkpoint failed", detail: `The ${checkpoint.phase} update could not be published.`, tone: "amber" });
+      if (checkpoint.phase === "handoff") {
+        addRunEvent(runId, "stage_failed", "Live run stage failed: issue_update", message);
+        addRunEvent(runId, "handoff_comment_failed", "Pull request ready; Issue update failed", message);
+        addActivity({ projectId: project.id, taskId: task.id, runId, type: "handoff_warning", title: "Pull request ready; Issue update failed", detail: message, tone: "amber" });
+      }
+    },
+  }) : null;
   try {
+    await checkpoints?.checkpoint({ phase: "started" }, { force: true });
+    checkpoints?.startHeartbeat();
     assertRunNotStopped(runId);
     enterStage("configuration", "Validating the task, project, and live-run prerequisites.");
     updateRun(runId, { status: "running", progress: 4, currentActivity: "Validating the local checkout" });
@@ -124,11 +144,12 @@ export async function executeLiveRun(runId: string, taskId: string, sourceRunId?
     updateRun(runId, { progress: 12, branchName: workspace.branchName, workspacePath: workspace.workspacePath, currentActivity: workspace.reused ? "Existing worktree resumed" : "Fresh isolated worktree ready" });
     updateTask(task.id, { branchName: workspace.branchName, summary: "Cline is working inside an isolated worktree." });
     addRunEvent(runId, workspace.reused ? "workspace_reused" : "workspace_created", workspace.reused ? "Existing isolated worktree resumed" : "Fresh isolated worktree created", workspace.workspacePath);
+    await checkpoints?.checkpoint({ phase: "workspace", progress: 12 }, { force: true });
     const prompt = await buildPrompt(expandHome(project.localPath), task);
     assertRunNotStopped(runId);
     enterStage("cline", "Starting the Cline session and executing the task turn.");
     const result = await dependencies.runCline({ runId, task, project, prompt, workspacePath: workspace.workspacePath, providerId: run.providerId, modelId: run.modelId }, {
-      onActivity: (message, detail) => { const safeMessage = redactSecrets(message) ?? "Cline activity"; updateRun(runId, { progress: Math.min(68, 15 + Math.floor(Math.random() * 30)), currentActivity: safeMessage }); addRunEvent(runId, "cline", safeMessage, detail); },
+      onActivity: (message, detail) => { const safeMessage = redactSecrets(message) ?? "Cline activity"; updateRun(runId, { progress: Math.min(68, 15 + Math.floor(Math.random() * 30)), currentActivity: safeMessage }); addRunEvent(runId, "cline", safeMessage, detail); void checkpoints?.checkpoint({ phase: "progress" }); },
       onEvent: (type, message, detail) => addRunEvent(runId, type, message, detail),
       onUsage: (usage) => persistRunUsage(runId, usage),
     });
@@ -145,6 +166,7 @@ export async function executeLiveRun(runId: string, taskId: string, sourceRunId?
     updateRun(runId, { checks: safeChecked });
     assertRunNotStopped(runId);
     if (safeChecked.some((check) => check.status === "failed")) throw new Error("A configured validation check failed. The worktree was preserved and no PR was created.");
+    await checkpoints?.checkpoint({ phase: "validation", progress: 72 }, { force: true });
     enterStage("git_handoff", "Committing and pushing the task branch.");
     updateRun(runId, { progress: 88, currentActivity: "Committing and pushing the task branch" });
     const handoff = await dependencies.commitAndPush(workspace, task.title);
@@ -161,15 +183,8 @@ export async function executeLiveRun(runId: string, taskId: string, sourceRunId?
     addRunEvent(runId, "handoff_complete", "Pull request created", pr.url);
     addActivity({ projectId: project.id, taskId: task.id, runId, type: "pull_request", title: "Live PR ready for review", detail: `${handoff.changedFiles.length} changed files · ${handoff.sha.slice(0, 8)}`, tone: "violet" });
     if (task.issueNumber) {
-      enterStage("issue_update", "Publishing the optional Issue handoff comment.");
-      try {
-        await dependencies.publishComment(project.fullName, task.issueNumber, `Agent handoff is ready.\n\nPR: ${pr.url}\nCommit: ${handoff.sha}\nChanged files: ${handoff.changedFiles.length}\nChecks: ${safeChecked.filter((check) => check.status === "passed").length}/${safeChecked.length} passed.`);
-      } catch (error) {
-        const message = safeErrorMessage(error);
-        addRunEvent(runId, "stage_failed", "Live run stage failed: issue_update", message);
-        addRunEvent(runId, "handoff_comment_failed", "Pull request ready; Issue update failed", message);
-        addActivity({ projectId: project.id, taskId: task.id, runId, type: "handoff_warning", title: "Pull request ready; Issue update failed", detail: message, tone: "amber" });
-      }
+      enterStage("issue_update", "Publishing the Issue checkpoint for the review handoff.");
+      await checkpoints?.checkpoint({ phase: "handoff", progress: 100, detail: `PR: ${pr.url} · Commit: ${handoff.sha.slice(0, 8)} · Checks: ${safeChecked.filter((check) => check.status === "passed").length}/${safeChecked.length} passed.` }, { force: true });
     }
   } catch (error) {
     if (getRun(runId)?.status === "stopped") return;
@@ -181,6 +196,9 @@ export async function executeLiveRun(runId: string, taskId: string, sourceRunId?
     addRunEvent(runId, "stage_failed", `Live run stage failed: ${stage}`, safeErrorMessage(error));
     addRunEvent(runId, "run_failed", "Live run failed", message);
     addActivity({ projectId: project.id, taskId: task.id, runId, type: "run_failed", title: "Live run failed", detail: message, tone: "red" });
+    await checkpoints?.checkpoint({ phase: "failed" }, { force: true });
+  } finally {
+    checkpoints?.stop();
   }
 }
 
