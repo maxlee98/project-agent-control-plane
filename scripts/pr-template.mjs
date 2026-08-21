@@ -8,7 +8,7 @@ export function requiredHeadings(template) {
   return [...template.matchAll(/^#{2,3}\s+(.+)$/gm)].map((match) => match[1].trim());
 }
 
-const issueReferencePattern = /\bRefs\s+#\d+\b|https:\/\/github\.com\/[^/\s)]+\/[^/\s)]+\/issues\/\d+\b/i;
+const issueReferencePattern = /\b(?:Fixes|Closes)\s+#\d+\b/i;
 
 export function validatePrBody(template, body) {
   const errors = [];
@@ -24,7 +24,7 @@ export function validatePrBody(template, body) {
   }
   if (!/- \[x\] No `?\.env/.test(body)) errors.push("security secrets checklist is not checked");
   if (!body.includes("Not applicable")) errors.push("UX evidence needs evidence or an explicit Not applicable reason");
-  if (!issueReferencePattern.test(body)) errors.push("canonical GitHub Issue reference is missing (use Refs #<number> or an Issue URL)");
+  if (!issueReferencePattern.test(body)) errors.push("explicit canonical GitHub Issue linkage is missing (use Fixes #<number> or Closes #<number>)");
   return errors;
 }
 
