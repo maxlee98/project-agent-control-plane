@@ -43,9 +43,11 @@ implementation artifacts rather than separate task items.
 - `src/lib/server/github.ts` — GitHub REST/Projects V2 integration.
 - `workflows/default/WORKFLOW.md` — versioned agent behavior contract.
 
-The Cline implementation should use `ClineCore`, subscribe to `agent_event` messages, translate
-them into the stable run event vocabulary, and always dispose the session. GitHub writes should be
-performed by a host-side adapter rather than passing the raw token into the child agent process.
+The Cline implementation should use `ClineCore`, subscribe to its session event envelope, translate
+events into the stable run event vocabulary, and always dispose the session. High-volume agent
+events stay in local run history; only host-owned lifecycle checkpoints are eligible for external
+publication. GitHub writes should be performed by a host-side adapter rather than passing the raw
+token into the child agent process.
 
 ## Live-run verification procedure
 

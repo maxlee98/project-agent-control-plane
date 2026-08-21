@@ -1,11 +1,12 @@
 import { ClineCore } from "@cline/sdk";
 import type { AgentRunInput } from "../integrations";
+import { shouldPublishGithubCheckpoint, type RunEventDraft } from "../domain";
 import { readRunUsage, type RunUsageSnapshot } from "./cost";
 import { redactSecrets } from "./redaction";
 
 export interface ClineCallbacks {
   onActivity(message: string, detail?: string | null): void;
-  onEvent(type: string, message: string, detail?: string | null): void;
+  onEvent(event: RunEventDraft): void;
   onUsage?(usage: RunUsageSnapshot): void;
 }
 
@@ -44,6 +45,158 @@ function normalizeFinishReason(value: unknown): ClineFinishReason {
 
 function unsuccessfulCompletionError(completion: ClineCompletion) {
   return new Error(`Cline run did not complete successfully (finish reason: ${completion.finishReason}).`);
+}
+
+const AGENT_EVENT_TYPES = new Set([
+  "content_start",
+  "content_update",
+  "content_end",
+  "iteration_start",
+  "iteration_end",
+  "usage",
+  "notice",
+  "done",
+  "error",
+]);
+
+function eventRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" ? value as Record<string, unknown> : null;
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function numberValue(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function redactedText(value: unknown, limit = 2_000) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const text = redactSecrets(value.trim());
+  return text && text.length > limit ? `${text.slice(0, limit)}…` : text;
+}
+
+function eventDraft(type: RunEventDraft["type"], message: string, detail?: unknown): RunEventDraft {
+  return {
+    type,
+    message,
+    detail: redactedText(detail),
+    checkpoint: shouldPublishGithubCheckpoint(type),
+  };
+}
+
+function agentEventFrom(input: unknown) {
+  const envelope = eventRecord(input);
+  const type = stringValue(envelope?.type);
+  const payload = eventRecord(envelope?.payload);
+  if (type === "agent_event") return eventRecord(payload?.event);
+  if (type && AGENT_EVENT_TYPES.has(type)) return envelope;
+  return null;
+}
+
+function usageFrom(value: unknown): Partial<RunUsageSnapshot> | undefined {
+  const usage = eventRecord(value);
+  if (!usage) return undefined;
+  const inputTokens = numberValue(usage.totalInputTokens ?? usage.inputTokens);
+  const outputTokens = numberValue(usage.totalOutputTokens ?? usage.outputTokens);
+  const cacheReadTokens = numberValue(usage.totalCacheReadTokens ?? usage.cacheReadTokens);
+  const cacheWriteTokens = numberValue(usage.totalCacheWriteTokens ?? usage.cacheWriteTokens);
+  if (inputTokens === undefined && outputTokens === undefined && cacheReadTokens === undefined && cacheWriteTokens === undefined && numberValue(usage.totalCost) === undefined) return undefined;
+  return {
+    inputTokens: inputTokens ?? 0,
+    outputTokens: outputTokens ?? 0,
+    cacheReadTokens: cacheReadTokens ?? 0,
+    cacheWriteTokens: cacheWriteTokens ?? 0,
+    totalCost: numberValue(usage.totalCost),
+  };
+}
+
+function toolDetail(agentEvent: Record<string, unknown>, includeError = false) {
+  const toolName = redactedText(agentEvent.toolName, 240);
+  const error = includeError ? redactedText(agentEvent.error, 1_200) : null;
+  if (toolName && error) return `${toolName}: ${error}`;
+  return error ?? toolName;
+}
+
+/**
+ * Translate ClineCore's event vocabulary at the integration boundary. Only stable control-plane
+ * event types and selected, redacted scalar details leave this function.
+ */
+export function translateClineEvent(input: unknown): RunEventDraft | null {
+  const envelope = eventRecord(input);
+  if (!envelope) return null;
+  const envelopeType = stringValue(envelope.type);
+  const agentEvent = agentEventFrom(input);
+  const agentType = stringValue(agentEvent?.type);
+
+  if (agentEvent && agentType === "content_start") {
+    const contentType = stringValue(agentEvent.contentType);
+    if (contentType === "tool") return eventDraft("tool_started", "Agent started a tool", toolDetail(agentEvent));
+    if (contentType === "text") return eventDraft("progress", "Agent started producing output", agentEvent.text);
+    return eventDraft("progress", "Agent started an internal update");
+  }
+  if (agentEvent && agentType === "content_update") {
+    return eventDraft("progress", "Agent tool progress updated", toolDetail(agentEvent));
+  }
+  if (agentEvent && agentType === "content_end") {
+    const contentType = stringValue(agentEvent.contentType);
+    if (contentType === "tool") return eventDraft("tool_finished", "Agent finished a tool", toolDetail(agentEvent, true));
+    if (contentType === "text") return eventDraft("output_summary", "Agent output summarized", agentEvent.text);
+    return eventDraft("progress", "Agent completed an internal update");
+  }
+  if (agentEvent && agentType === "iteration_start") {
+    const iteration = numberValue(agentEvent.iteration);
+    return eventDraft("progress", "Agent iteration started", iteration === undefined ? undefined : `Iteration ${iteration}`);
+  }
+  if (agentEvent && agentType === "iteration_end") {
+    const iteration = numberValue(agentEvent.iteration);
+    const toolCallCount = numberValue(agentEvent.toolCallCount);
+    const detail = iteration === undefined
+      ? undefined
+      : toolCallCount === undefined
+        ? `Iteration ${iteration} completed`
+        : `Iteration ${iteration} completed · ${toolCallCount} tool calls`;
+    return eventDraft("progress", "Agent iteration completed", detail);
+  }
+  if (agentEvent && agentType === "usage") return eventDraft("progress", "Agent usage updated");
+  if (agentEvent && agentType === "notice") return eventDraft("progress", "Agent reported an update", agentEvent.message);
+  if (agentEvent && agentType === "done") {
+    const completed = stringValue(agentEvent.reason) === "completed";
+    return eventDraft(completed ? "run_completed" : "run_failed", completed ? "Agent turn completed" : "Agent turn ended before completion", completed ? agentEvent.text : undefined);
+  }
+  if (agentEvent && agentType === "error") return eventDraft("run_failed", "Agent reported an error", agentEvent.error instanceof Error ? agentEvent.error.message : agentEvent.error);
+
+  if (envelopeType === "chunk") {
+    const payload = eventRecord(envelope.payload);
+    return eventDraft("output_chunk", "Agent output received", payload?.chunk);
+  }
+  if (envelopeType === "ended") {
+    const payload = eventRecord(envelope.payload);
+    const completed = stringValue(payload?.reason) === "completed";
+    return eventDraft(completed ? "run_completed" : "run_failed", completed ? "Agent turn completed" : "Agent turn ended before completion");
+  }
+  if (envelopeType === "hook") {
+    const payload = eventRecord(envelope.payload);
+    switch (stringValue(payload?.hookEventName)) {
+      case "tool_call": return eventDraft("tool_started", "Agent started a tool", payload?.toolName);
+      case "tool_result": return eventDraft("tool_finished", "Agent finished a tool", payload?.toolName);
+      case "agent_end": return eventDraft("run_completed", "Agent turn completed");
+      case "agent_error": return eventDraft("run_failed", "Agent reported an error");
+      case "session_shutdown": return eventDraft("progress", "Agent session shut down");
+      default: return eventDraft("unknown", "Agent update received");
+    }
+  }
+  if (envelopeType === "status") return eventDraft("progress", "Agent status updated");
+  if (envelopeType === "team_progress") return eventDraft("progress", "Agent team progress updated");
+  if (envelopeType === "pending_prompts") {
+    const payload = eventRecord(envelope.payload);
+    const prompts = Array.isArray(payload?.prompts) ? payload.prompts.length : 0;
+    return eventDraft("progress", "Agent is waiting for input", `${prompts} pending instruction${prompts === 1 ? "" : "s"}`);
+  }
+  if (envelopeType === "pending_prompt_submitted") return eventDraft("progress", "Agent instruction submitted");
+  if (envelopeType === "session_snapshot") return eventDraft("progress", "Agent session state updated");
+  return eventDraft("unknown", "Agent update received");
 }
 
 async function abortAndStopSession(cline: ClineCore, sessionId: string, reason: Error) {
@@ -110,64 +263,24 @@ export async function runCline(input: AgentRunInput & { runId: string; providerI
   }, Math.min(30_000, inactivityMs));
 
   const unsubscribe = cline.subscribe((event) => {
-    const payload = event.payload as {
-      sessionId?: string;
-      event?: { type?: string; text?: string; message?: string; toolName?: string; error?: Error | string; reason?: string; usage?: Partial<RunUsageSnapshot> };
-      chunk?: string;
-    };
-    if (!payload.sessionId || !sessionId || payload.sessionId !== sessionId) return;
+    const payload = eventRecord(event.payload);
+    const eventSessionId = stringValue(payload?.sessionId);
+    if (!eventSessionId || !sessionId || eventSessionId !== sessionId) return;
     lastActivityAt = Date.now();
 
-    if (event.type === "agent_event" && payload.event) {
-      const agentEvent = payload.event as {
-        type?: string;
-        text?: string;
-        message?: string;
-        toolName?: string;
-        error?: Error | string;
-        reason?: string;
-        inputTokens?: number;
-        outputTokens?: number;
-        cacheReadTokens?: number;
-        cacheWriteTokens?: number;
-        totalInputTokens?: number;
-        totalOutputTokens?: number;
-        totalCacheReadTokens?: number;
-        totalCacheWriteTokens?: number;
-        totalCost?: number;
-        usage?: {
-          inputTokens?: number;
-          outputTokens?: number;
-          cacheReadTokens?: number;
-          cacheWriteTokens?: number;
-          totalInputTokens?: number;
-          totalOutputTokens?: number;
-          totalCacheReadTokens?: number;
-          totalCacheWriteTokens?: number;
-          totalCost?: number;
-        };
-      };
-      const detail = redactSecrets(
-        agentEvent.type === "error"
-          ? safeErrorMessage(agentEvent.error)
-          : agentEvent.type === "content_end"
-            ? agentEvent.text
-            : agentEvent.type === "notice"
-              ? agentEvent.message
-              : agentEvent.toolName,
-      );
-      callbacks.onEvent(agentEvent.type ?? "agent_event", agentEvent.type ?? "Agent event", detail);
-      if (agentEvent.type === "content_start" || agentEvent.type === "notice") {
-        callbacks.onActivity(redactSecrets(agentEvent.message ?? agentEvent.toolName ?? agentEvent.type) ?? "Agent event", detail);
+    const translated = translateClineEvent(event);
+    if (translated) {
+      callbacks.onEvent(translated);
+      if (translated.type === "progress" || translated.type === "tool_started" || translated.type === "tool_finished" || translated.type === "output_summary") {
+        callbacks.onActivity(translated.message, translated.detail);
       }
-      if (agentEvent.type === "usage") {
-        const usage = {
-          inputTokens: agentEvent.totalInputTokens ?? agentEvent.inputTokens ?? 0,
-          outputTokens: agentEvent.totalOutputTokens ?? agentEvent.outputTokens ?? 0,
-          cacheReadTokens: agentEvent.totalCacheReadTokens ?? agentEvent.cacheReadTokens ?? 0,
-          cacheWriteTokens: agentEvent.totalCacheWriteTokens ?? agentEvent.cacheWriteTokens ?? 0,
-          totalCost: agentEvent.totalCost,
-        };
+    }
+
+    const agentEvent = agentEventFrom(event);
+    const agentType = stringValue(agentEvent?.type);
+    if (agentEvent && agentType === "usage") {
+      const usage = usageFrom(agentEvent);
+      if (usage) {
         void readRunUsage(providerId, modelId, usage).then((snapshot) => {
           if (snapshot) {
             latestUsage = snapshot;
@@ -175,28 +288,22 @@ export async function runCline(input: AgentRunInput & { runId: string; providerI
           }
         }).catch(() => undefined);
       }
-      if (agentEvent.type === "done") {
-        if (agentEvent.usage) {
-          void readRunUsage(providerId, modelId, {
-            inputTokens: agentEvent.usage.totalInputTokens ?? agentEvent.usage.inputTokens ?? 0,
-            outputTokens: agentEvent.usage.totalOutputTokens ?? agentEvent.usage.outputTokens ?? 0,
-            cacheReadTokens: agentEvent.usage.totalCacheReadTokens ?? agentEvent.usage.cacheReadTokens ?? 0,
-            cacheWriteTokens: agentEvent.usage.totalCacheWriteTokens ?? agentEvent.usage.cacheWriteTokens ?? 0,
-            totalCost: agentEvent.usage.totalCost,
-          }).then((snapshot) => {
-            if (snapshot) {
-              latestUsage = snapshot;
-              callbacks.onUsage?.(snapshot);
-            }
-          }).catch(() => undefined);
-        }
-        resolveEnded({ text: redactSecrets(agentEvent.text) ?? "", finishReason: normalizeFinishReason(agentEvent.reason), usage: agentEvent.usage });
+    }
+    if (agentEvent && agentType === "done") {
+      const usage = usageFrom(agentEvent.usage);
+      if (usage) {
+        void readRunUsage(providerId, modelId, usage).then((snapshot) => {
+          if (snapshot) {
+            latestUsage = snapshot;
+            callbacks.onUsage?.(snapshot);
+          }
+        }).catch(() => undefined);
       }
-      if (agentEvent.type === "error") rejectEnded(new Error(safeErrorMessage(agentEvent.error)));
-    } else if (event.type === "chunk" && payload.chunk) {
-      callbacks.onEvent("chunk", "Agent output", redactSecrets(payload.chunk.slice(-1000)));
-    } else if (event.type === "ended") {
-      resolveEnded({ text: "", finishReason: normalizeFinishReason((event.payload as { reason?: string }).reason) });
+      resolveEnded({ text: redactedText(agentEvent.text) ?? "", finishReason: normalizeFinishReason(agentEvent.reason), usage });
+    }
+    if (agentEvent && agentType === "error") rejectEnded(new Error(safeErrorMessage(agentEvent.error)));
+    if (stringValue(event.type) === "ended") {
+      resolveEnded({ text: "", finishReason: normalizeFinishReason(payload?.reason) });
     }
   });
 
@@ -223,7 +330,7 @@ export async function runCline(input: AgentRunInput & { runId: string; providerI
     sessionId = result.sessionId.trim();
     if (!sessionId) throw new Error("Cline startup returned no session ID.");
     activeSessions.set(input.runId, { cline, sessionId });
-    callbacks.onEvent("session_started", "Cline session started", sessionId);
+    callbacks.onEvent(eventDraft("session_started", "Cline session started"));
     const remainingMs = Math.max(1, deadline - Date.now());
     const sendResult = await withTimeout(cline.send({ sessionId, prompt: input.prompt, mode: "act" }), remainingMs, "completion", () => stopAfterTimeout(timeoutError("completion")));
     const completion: ClineCompletion = sendResult

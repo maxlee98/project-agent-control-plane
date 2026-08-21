@@ -7,7 +7,7 @@ import { IssueCheckpointPublisher } from "./issue-checkpoints";
 import type { RunUsageSnapshot } from "./cost";
 import { commitAndPush, detectChecks, expandHome, prepareWorkspace, runChecks, type WorkspaceHandle } from "./workspaces";
 import { redactSecrets } from "./redaction";
-import type { AgentRun } from "../domain";
+import type { AgentRun, RunEventDraft, RunEventType } from "../domain";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -18,12 +18,12 @@ const activeRuns = globalThis.activeControlPlaneRuns ?? new Map<string, NodeJS.T
 if (process.env.NODE_ENV !== "production") globalThis.activeControlPlaneRuns = activeRuns;
 
 const demoSteps = [
-  { progress: 14, activity: "Reading WORKFLOW.md and issue context", event: "Loaded repository contract", detail: "The workflow prompt and recent human context are ready." },
-  { progress: 31, activity: "Inspecting the repository structure", event: "Workspace prepared", detail: "The agent is working inside an isolated task worktree." },
-  { progress: 53, activity: "Implementing the requested change", event: "Code changes in progress", detail: "The active branch is being updated by Cline." },
-  { progress: 72, activity: "Running project validation", event: "Validation started", detail: "Configured tests, lint, and build checks are running." },
-  { progress: 89, activity: "Preparing a reviewable handoff", event: "Review summary prepared", detail: "Changed files and validation results are being condensed." },
-  { progress: 100, activity: "Pull request ready for review", event: "Run completed", detail: "The branch is ready for a human review checkpoint." },
+  { progress: 14, activity: "Reading WORKFLOW.md and issue context", type: "progress", message: "Loaded repository contract", detail: "The workflow prompt and recent human context are ready." },
+  { progress: 31, activity: "Inspecting the repository structure", type: "workspace_ready", message: "Workspace prepared", detail: "The agent is working inside an isolated task worktree." },
+  { progress: 53, activity: "Implementing the requested change", type: "progress", message: "Code changes in progress", detail: "The active branch is being updated by the agent." },
+  { progress: 72, activity: "Running project validation", type: "validation_started", message: "Validation started", detail: "Configured tests, lint, and build checks are running." },
+  { progress: 89, activity: "Preparing a reviewable handoff", type: "progress", message: "Review summary prepared", detail: "Changed files and validation results are being condensed." },
+  { progress: 100, activity: "Pull request ready for review", type: "run_completed", message: "Run completed", detail: "The branch is ready for a human review checkpoint." },
 ] as const;
 
 function livePrerequisiteError() {
@@ -93,6 +93,10 @@ async function buildPrompt(projectPath: string, task: ReturnType<typeof getTask>
   return `${workflow}\n\n## Assigned task\nTitle: ${task.title}\n\nDescription:\n${task.description || "No description provided."}\n\nLatest context:\n${task.currentSummary}\n\nWork in the assigned isolated workspace. Make the change, validate it, and leave a concise handoff.`;
 }
 
+function persistRunEvent(runId: string, event: RunEventDraft) {
+  addRunEvent(runId, event.type, event.message, event.detail);
+}
+
 export async function executeLiveRun(runId: string, taskId: string, sourceRunId?: string, dependencies: LiveRunDependencies = liveRunDependencies) {
   const task = getTask(taskId);
   const project = task ? getProject(task.projectId) : null;
@@ -149,8 +153,8 @@ export async function executeLiveRun(runId: string, taskId: string, sourceRunId?
     assertRunNotStopped(runId);
     enterStage("cline", "Starting the Cline session and executing the task turn.");
     const result = await dependencies.runCline({ runId, task, project, prompt, workspacePath: workspace.workspacePath, providerId: run.providerId, modelId: run.modelId }, {
-      onActivity: (message, detail) => { const safeMessage = redactSecrets(message) ?? "Cline activity"; updateRun(runId, { progress: Math.min(68, 15 + Math.floor(Math.random() * 30)), currentActivity: safeMessage }); addRunEvent(runId, "cline", safeMessage, detail); void checkpoints?.checkpoint({ phase: "progress" }); },
-      onEvent: (type, message, detail) => addRunEvent(runId, type, message, detail),
+      onActivity: (message, detail) => { const safeMessage = redactSecrets(message) ?? "Cline activity"; updateRun(runId, { progress: Math.min(68, 15 + Math.floor(Math.random() * 30)), currentActivity: safeMessage }); void checkpoints?.checkpoint({ phase: "progress" }); },
+      onEvent: (event) => persistRunEvent(runId, event),
       onUsage: (usage) => persistRunUsage(runId, usage),
     });
     assertRunNotStopped(runId);
@@ -161,11 +165,17 @@ export async function executeLiveRun(runId: string, taskId: string, sourceRunId?
     enterStage("validation", "Detecting and running repository validation checks.");
     const checks = await dependencies.detectChecks(workspace.workspacePath);
     assertRunNotStopped(runId);
+    addRunEvent(runId, "validation_started", "Validation started", `${checks.length} configured check${checks.length === 1 ? "" : "s"} detected.`);
     const checked = await dependencies.runChecks(workspace.workspacePath, checks, (next) => updateRun(runId, { checks: safeChecks(next), currentActivity: next.find((check) => check.status === "running")?.command ?? "Running validation" }));
     const safeChecked = safeChecks(checked);
     updateRun(runId, { checks: safeChecked });
     assertRunNotStopped(runId);
-    if (safeChecked.some((check) => check.status === "failed")) throw new Error("A configured validation check failed. The worktree was preserved and no PR was created.");
+    const failedChecks = safeChecked.filter((check) => check.status === "failed");
+    if (failedChecks.length > 0) {
+      addRunEvent(runId, "validation_failed", "Validation failed", `${failedChecks.length} of ${safeChecked.length} checks failed.`);
+      throw new Error("A configured validation check failed. The worktree was preserved and no PR was created.");
+    }
+    addRunEvent(runId, "validation_passed", "Validation passed", `${safeChecked.filter((check) => check.status === "passed").length}/${safeChecked.length} checks passed.`);
     await checkpoints?.checkpoint({ phase: "validation", progress: 72 }, { force: true });
     enterStage("git_handoff", "Committing and pushing the task branch.");
     updateRun(runId, { progress: 88, currentActivity: "Committing and pushing the task branch" });
@@ -216,7 +226,8 @@ function schedule(runId: string, taskId: string, mode: AgentRun["mode"]) {
       if (!currentTask) return;
       const currentRun = updateRun(runId, { status: step.progress === 100 ? "completed" : "running", progress: step.progress, currentActivity: step.activity, finishedAt: step.progress === 100 ? new Date().toISOString() : null });
       if (!currentRun) return;
-      addRunEvent(runId, step.event, step.event, step.detail);
+      const event: RunEventDraft = { type: step.type as RunEventType, message: step.message, detail: step.detail, checkpoint: false };
+      persistRunEvent(runId, event);
       updateTask(taskId, {
         status: step.progress === 100 ? "agent_review" : "in_progress",
         agentState: step.progress === 100 ? "succeeded" : "running",
@@ -225,7 +236,7 @@ function schedule(runId: string, taskId: string, mode: AgentRun["mode"]) {
         prUrl: step.progress === 100 ? `https://github.com/${currentTask.githubUrl?.split("github.com/")[1]?.split("/issues/")[0] ?? "owner/repository"}/pull/${currentTask.issueNumber ?? 1}` : currentTask.prUrl,
       });
       if (index === 0 || step.progress === 72 || step.progress === 100) {
-        addActivity({ projectId: currentTask.projectId, taskId, runId, type: step.progress === 100 ? "pull_request" : "checkpoint", title: step.event, detail: step.detail, tone: step.progress === 100 ? "violet" : "amber" });
+        addActivity({ projectId: currentTask.projectId, taskId, runId, type: step.progress === 100 ? "pull_request" : "checkpoint", title: step.message, detail: step.detail, tone: step.progress === 100 ? "violet" : "amber" });
       }
       if (step.progress === 100) activeRuns.delete(runId);
     }, index === 0 ? 900 : index * 2600);

@@ -33,6 +33,16 @@ You are working on a task selected by the Project Agent Control Plane.
   for content filtering`, preserve the workspace, reduce and remeasure the request, and retry at most
   once. Never retry the unchanged payload or switch providers silently.
 
+## Run events and checkpoints
+
+- The control plane owns the stable run-event vocabulary. Treat agent/tool event names as an
+  implementation detail and do not depend on them in task summaries or handoffs.
+- Detailed progress, tool activity, output chunks, and bounded summaries remain local run history.
+- GitHub receives concise host-generated checkpoints at meaningful validation, failure, stop, and
+  final handoff boundaries only; never publish every tool call or output chunk.
+- Keep event details concise and redacted. Do not include credentials, session identifiers, raw tool
+  input/output, arbitrary provider metadata, or full prompts in events or comments.
+
 ## Terminal hard stop
 
 - Agent-authored terminal commands MUST run through `npm run safe:run -- --timeout-ms 120000 -- <direct-command> <args>`.
