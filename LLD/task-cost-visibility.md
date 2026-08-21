@@ -153,4 +153,4 @@ cost” so neither is confused with the other.
 - [x] Implementation self-review completed
 - [x] Tests, typecheck, build, and diff checks rerun for the repair
 - [x] Documentation updated
-- [ ] Handoff verified after the repair branch is validated
+- [x] Handoff verified: commit `d3bc890e0ccb6a9459dc8a0097d1e003c371fe0d`, branch `agent/21-There-should-be-an-associated-cost-a2d20ec9`, PR #31 open at https://github.com/maxlee98/project-agent-control-plane/pull/31; fresh CI and PR-template checks passed
