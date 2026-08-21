@@ -3,6 +3,7 @@ import path from "node:path";
 import { addActivity, addRunEvent, createRun, getProject, getRun, getTask, updateRun, updateTask } from "./repository";
 import { createPullRequest, publishComment } from "./github";
 import { runCline, stopClineRun } from "./cline";
+import { IssueCheckpointPublisher } from "./issue-checkpoints";
 import type { RunUsageSnapshot } from "./cost";
 import { commitAndPush, detectChecks, expandHome, prepareWorkspace, runChecks, type WorkspaceHandle } from "./workspaces";
 import type { AgentRun } from "../domain";
@@ -57,7 +58,21 @@ async function executeLiveRun(runId: string, taskId: string, sourceRunId?: strin
   const project = task ? getProject(task.projectId) : null;
   if (!task || !project) throw new Error("Project or task disappeared before live dispatch.");
   let workspace: WorkspaceHandle | undefined;
+  const checkpoints = task.issueNumber ? new IssueCheckpointPublisher({
+    fullName: project.fullName,
+    issueNumber: task.issueNumber,
+    runId,
+    publishComment,
+    intervalMs: Number(process.env.AGENT_CHECKPOINT_INTERVAL_MINUTES) > 0 ? Number(process.env.AGENT_CHECKPOINT_INTERVAL_MINUTES) * 60_000 : undefined,
+    onFailure: (checkpoint, error) => {
+      const message = error instanceof Error ? error.message : "GitHub Issue checkpoint failed.";
+      addRunEvent(runId, "issue_checkpoint_failed", `GitHub Issue checkpoint failed (${checkpoint.phase})`, message);
+      addActivity({ projectId: project.id, taskId: task.id, runId, type: "issue_checkpoint_failed", title: "GitHub Issue checkpoint failed", detail: `The ${checkpoint.phase} update could not be published.`, tone: "amber" });
+    },
+  }) : null;
   try {
+    await checkpoints?.checkpoint({ phase: "started" }, { force: true });
+    checkpoints?.startHeartbeat();
     updateRun(runId, { status: "running", progress: 4, currentActivity: "Validating the local checkout" });
     addRunEvent(runId, "dispatch", "Live run dispatched", "Preparing an isolated Git worktree.");
     const run = getRun(runId);
@@ -67,9 +82,10 @@ async function executeLiveRun(runId: string, taskId: string, sourceRunId?: strin
     updateRun(runId, { progress: 12, branchName: workspace.branchName, workspacePath: workspace.workspacePath, currentActivity: workspace.reused ? "Existing worktree resumed" : "Fresh isolated worktree ready" });
     updateTask(task.id, { branchName: workspace.branchName, summary: "Cline is working inside an isolated worktree." });
     addRunEvent(runId, workspace.reused ? "workspace_reused" : "workspace_created", workspace.reused ? "Existing isolated worktree resumed" : "Fresh isolated worktree created", workspace.workspacePath);
+    await checkpoints?.checkpoint({ phase: "workspace", progress: 12 }, { force: true });
     const prompt = await buildPrompt(expandHome(project.localPath), task);
     const result = await runCline({ runId, task, project, prompt, workspacePath: workspace.workspacePath, providerId: run.providerId, modelId: run.modelId }, {
-      onActivity: (message, detail) => { updateRun(runId, { progress: Math.min(68, 15 + Math.floor(Math.random() * 30)), currentActivity: message }); addRunEvent(runId, "cline", message, detail); },
+      onActivity: (message, detail) => { updateRun(runId, { progress: Math.min(68, 15 + Math.floor(Math.random() * 30)), currentActivity: message }); addRunEvent(runId, "cline", message, detail); void checkpoints?.checkpoint({ phase: "progress" }); },
       onEvent: (type, message, detail) => addRunEvent(runId, type, message, detail),
       onUsage: (usage) => persistRunUsage(runId, usage),
     });
@@ -80,6 +96,7 @@ async function executeLiveRun(runId: string, taskId: string, sourceRunId?: strin
     const checked = await runChecks(workspace.workspacePath, checks, (next) => updateRun(runId, { checks: next, currentActivity: next.find((check) => check.status === "running")?.command ?? "Running validation" }));
     updateRun(runId, { checks: checked });
     if (checked.some((check) => check.status === "failed")) throw new Error("A configured validation check failed. The worktree was preserved and no PR was created.");
+    await checkpoints?.checkpoint({ phase: "validation", progress: 72 }, { force: true });
     updateRun(runId, { progress: 88, currentActivity: "Committing and pushing the task branch" });
     const handoff = await commitAndPush(workspace, task.title);
     updateRun(runId, { commitSha: handoff.sha, changedFiles: handoff.changedFiles, progress: 94, currentActivity: "Creating the GitHub pull request" });
@@ -90,15 +107,7 @@ async function executeLiveRun(runId: string, taskId: string, sourceRunId?: strin
     updateRun(runId, { status: "completed", progress: 100, currentActivity: "Pull request ready for review", finishedAt: new Date().toISOString() });
     addRunEvent(runId, "handoff_complete", "Pull request created", pr.url);
     addActivity({ projectId: project.id, taskId: task.id, runId, type: "pull_request", title: "Live PR ready for review", detail: `${handoff.changedFiles.length} changed files · ${handoff.sha.slice(0, 8)}`, tone: "violet" });
-    if (task.issueNumber) {
-      try {
-        await publishComment(project.fullName, task.issueNumber, `Agent handoff is ready.\n\nPR: ${pr.url}\nCommit: ${handoff.sha}\nChanged files: ${handoff.changedFiles.length}\nChecks: ${checked.filter((check) => check.status === "passed").length}/${checked.length} passed.`);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "The Issue handoff comment could not be published.";
-        addRunEvent(runId, "handoff_comment_failed", "Pull request ready; Issue update failed", message);
-        addActivity({ projectId: project.id, taskId: task.id, runId, type: "handoff_warning", title: "Pull request ready; Issue update failed", detail: message, tone: "amber" });
-      }
-    }
+    await checkpoints?.checkpoint({ phase: "handoff", progress: 100, detail: `PR: ${pr.url} · Commit: ${handoff.sha.slice(0, 8)} · Checks: ${checked.filter((check) => check.status === "passed").length}/${checked.length} passed.` }, { force: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Live agent failed unexpectedly.";
     const failedRun = getRun(runId);
@@ -107,6 +116,9 @@ async function executeLiveRun(runId: string, taskId: string, sourceRunId?: strin
     updateTask(task.id, { status: "blocked", agentState: "failed", summary: message });
     addRunEvent(runId, "run_failed", "Live run failed", message);
     addActivity({ projectId: project.id, taskId: task.id, runId, type: "run_failed", title: "Live run failed", detail: message, tone: "red" });
+    await checkpoints?.checkpoint({ phase: "failed" }, { force: true });
+  } finally {
+    checkpoints?.stop();
   }
 }
 
