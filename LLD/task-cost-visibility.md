@@ -173,6 +173,9 @@ cost” so neither is confused with the other.
   persisted provider/model/token/cost snapshot or task aggregation.
 - Handoff linkage requirement: the existing PR must be updated with a template-compliant `Fixes #21`
   reference and verified by GitHub as closing canonical Issue #21.
+- Remote handoff verification: PR #34 is open at https://github.com/maxlee98/project-agent-control-plane/pull/34,
+  targets `main` from `fix/task-21-cost-run-handoff`, passes the remote template verifier, and GitHub
+  parses Issue #21 as its closing reference.
 
 ## Completion checklist
 
@@ -183,4 +186,4 @@ cost” so neither is confused with the other.
 - [x] Documentation updated
 - [x] Original implementation handoff verified: commit `d3bc890e0ccb6a9459dc8a0097d1e003c371fe0d`, branch `agent/21-There-should-be-an-associated-cost-a2d20ec9`, PR #31 merged at https://github.com/maxlee98/project-agent-control-plane/pull/31; the observed post-handoff 422 repair is covered on the follow-up branch
 - [x] Repository handoff policy corrected from `Refs` to explicit `Fixes`/`Closes` linkage
-- [ ] Existing PR #34 updated and verified with GitHub closing Issue #21
+- [x] Existing PR #34 updated and verified with GitHub closing Issue #21

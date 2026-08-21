@@ -146,6 +146,8 @@ or Issue is deleted by this change.
 - Historical PR #29 remote verification: passed with state `open`, base `main`, head
   `fix/issue-linked-pr-handoff`, and URL `https://github.com/maxlee98/project-agent-control-plane/pull/29`.
 - PR #33 was superseded and closed; its policy work is carried into Task #21 PR #34.
+- PR #34 remote verification: passed with state `open`, base `main`, head
+  `fix/task-21-cost-run-handoff`, template compliance, and GitHub closing Issue #21.
 - No Project PR item was created: the PR handoff uses the Pull Requests API only, and the Project
   integration path/tests add and reconcile Issues only.
 - Follow-up implementation validation: the generated body now contains one `Fixes #<issue>` token;
@@ -183,5 +185,5 @@ or Issue is deleted by this change.
 - [x] Tests, typecheck, build, and diff checks passed
 - [x] LLD and handoff documentation updated
 - [x] Tracking Issue #28 and PR #29 linkage verified
-- [x] Follow-up PR #34 linkage to canonical Issue #21 specified with `Fixes #21`
+- [x] Follow-up PR #34 linkage to canonical Issue #21 verified with `Fixes #21`
 - [ ] Human review and merge approval remain pending
