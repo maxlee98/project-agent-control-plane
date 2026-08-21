@@ -22,6 +22,17 @@ You are working on a task selected by the Project Agent Control Plane.
 4. Check for a repository-specific `WORKFLOW.md` and follow it over this default contract.
 5. Inspect the current Git branch before the first edit. If it is `main`, create a task-scoped branch before changing files.
 
+## Model request size protection
+
+- Before a Cline/LLM request or continuation, follow `.agents/skills/content-size-protection/SKILL.md`.
+- Measure the complete request context, not just the newest prompt: system/workflow instructions,
+  task context, history, tool definitions, and tool output all count.
+- Use targeted excerpts, compact checkpoints, and chunked objectives. Do not send full repository
+  dumps, duplicate history, raw logs, generated artifacts, or secrets.
+- If OpenRouter returns `403 Request blocked by content filter: Request content exceeds maximum size
+  for content filtering`, preserve the workspace, reduce and remeasure the request, and retry at most
+  once. Never retry the unchanged payload or switch providers silently.
+
 ## Terminal hard stop
 
 - Agent-authored terminal commands MUST run through `npm run safe:run -- --timeout-ms 120000 -- <direct-command> <args>`.
