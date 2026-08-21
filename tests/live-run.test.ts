@@ -132,7 +132,7 @@ test("starts a session before sending the task turn and uses the returned result
   const events: string[] = [];
   const callbacks: ClineCallbacks = {
     onActivity: () => undefined,
-    onEvent: (type) => events.push(type),
+    onEvent: (event) => events.push(event.type),
     onUsage: () => undefined,
   };
   const dependencies: ClineRuntimeDependencies = { createCore: async () => fake.core };
@@ -146,6 +146,8 @@ test("starts a session before sending the task turn and uses the returned result
   assert.equal(result.finishReason, "completed");
   assert.equal(result.usage?.actualCostUsd, usage.actualCostUsd);
   assert.equal(events.includes("session_started"), true);
+  assert.equal(events.includes("run_completed"), true);
+  assert.equal(events.includes("done"), false);
   assert.equal(hasActiveClineSession("cline-unit"), false);
   assert.equal(fake.disposed, true);
   assert.equal(fake.stopped, false);
@@ -197,7 +199,7 @@ function createDependencies(label: string, options: { commentFailure?: boolean; 
     runCline: async (_input, callbacks) => {
       if (options.clineFailure) throw new Error(`Provider failed with token=${secret}`);
       callbacks.onActivity("Cline completed");
-      callbacks.onEvent("content_end", "Cline output", "Completed safely");
+      callbacks.onEvent({ type: "output_summary", message: "Agent output summarized", detail: "Completed safely", checkpoint: false });
       callbacks.onUsage?.(usage);
       return { sessionId: `session-${label}`, text: "Completed task", finishReason: "completed" as const, usage };
     },
@@ -242,6 +244,11 @@ test("completes a mocked live run with persisted state, events, PR identity, and
     assert.equal(events.some((event) => event.type === "stage_started" && event.message.includes(stage)), true, `missing stage event: ${stage}`);
   }
   assert.equal(eventTypes.has("handoff_complete"), true);
+  assert.equal(eventTypes.has("output_summary"), true);
+  assert.equal(eventTypes.has("validation_started"), true);
+  assert.equal(eventTypes.has("validation_passed"), true);
+  assert.equal(eventTypes.has("content_end"), false);
+  assert.equal(eventTypes.has("done"), false);
 });
 
 test("keeps a completed handoff when the optional Issue comment fails", async () => {

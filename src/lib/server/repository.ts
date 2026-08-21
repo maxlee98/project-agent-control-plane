@@ -3,7 +3,8 @@ import { db } from "./db";
 import { redactSecrets } from "./redaction";
 import { normalizeLocalPath } from "./paths";
 import { hasActiveClineSession } from "./cline";
-import type { ActivityItem, AgentRun, DashboardData, Project, RunCheck, RunCostSource, RunEvent, Task, TaskCostStatus, TaskStatus } from "../domain";
+import { normalizeRunEventType } from "../domain";
+import type { ActivityItem, AgentRun, DashboardData, Project, RunCheck, RunCostSource, RunEvent, RunEventType, Task, TaskCostStatus, TaskStatus } from "../domain";
 
 type ProjectRow = Record<string, unknown>;
 type TaskRow = Record<string, unknown>;
@@ -320,8 +321,16 @@ export function updateRun(runId: string, input: Partial<Pick<AgentRun, "status" 
   return mapRun(db.prepare("SELECT * FROM runs WHERE id = ?").get(runId) as RunRow);
 }
 
-export function addRunEvent(runId: string, type: string, message: string, detail?: string | null) {
-  const event = { id: `event-${randomUUID()}`, runId, type, message: redactSecrets(message) ?? "", detail: redactSecrets(detail), createdAt: isoNow() };
+export function addRunEvent(runId: string, type: RunEventType, message: string, detail?: string | null) {
+  const normalizedType = normalizeRunEventType(type);
+  const event = {
+    id: `event-${randomUUID()}`,
+    runId,
+    type: normalizedType,
+    message: normalizedType === "unknown" ? "Agent update received" : redactSecrets(message) ?? "",
+    detail: normalizedType === "unknown" ? null : redactSecrets(detail),
+    createdAt: isoNow(),
+  };
   db.prepare("INSERT INTO run_events (id, run_id, type, message, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(event.id, event.runId, event.type, event.message, event.detail, event.createdAt);
   return event;
 }
@@ -332,6 +341,14 @@ export function getRunEvents(runId?: string): RunEvent[] {
     : db.prepare("SELECT * FROM run_events ORDER BY created_at DESC LIMIT 160").all();
   return rows.map((row) => {
     const event = row as Record<string, unknown>;
-    return { id: String(event.id), runId: String(event.run_id), type: String(event.type), message: String(event.message), detail: event.detail ? String(event.detail) : null, createdAt: String(event.created_at) };
+    const type = normalizeRunEventType(event.type);
+    return {
+      id: String(event.id),
+      runId: String(event.run_id),
+      type,
+      message: type === "unknown" ? "Agent update received" : redactSecrets(String(event.message ?? "")) ?? "",
+      detail: type === "unknown" ? null : event.detail ? redactSecrets(String(event.detail)) : null,
+      createdAt: String(event.created_at),
+    };
   });
 }
