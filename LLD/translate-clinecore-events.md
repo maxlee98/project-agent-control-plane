@@ -187,4 +187,4 @@ Persistence and GitHub adapters retain their existing defense-in-depth redaction
 - [x] Orchestration/demo integration implemented
 - [x] Regression tests added
 - [x] Tests, typecheck, build, and diff checks passed
-- [ ] PR #22 handoff verified
+- [x] PR #41 handoff verified
