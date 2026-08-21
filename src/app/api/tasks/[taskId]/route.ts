@@ -1,5 +1,14 @@
 import { publishComment, reconcileTaskStatus } from "@/lib/server/github";
-import { addTaskComment, completeTaskByHuman, getProject, getTask, updateTask } from "@/lib/server/repository";
+import { addTaskComment, completeTaskByHuman, getProject, getTask, updateTask, updateTaskIssue } from "@/lib/server/repository";
+import type { Project, Task, TaskStatus } from "@/lib/domain";
+
+type SyncableTask = Pick<Task, "id" | "issueNumber" | "title" | "description" | "githubUrl">;
+
+async function syncTaskStatus(project: Project, task: SyncableTask, status: TaskStatus) {
+  const remote = await reconcileTaskStatus(project, task, status);
+  if (remote.issueCorrected) updateTaskIssue(task.id, remote.issueNumber, remote.githubUrl);
+  return remote;
+}
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ taskId: string }> }) {
   const { taskId } = await params;
@@ -19,8 +28,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ta
     const currentProject = currentTask ? getProject(currentTask.projectId) : null;
     if (!currentTask || !currentProject) return Response.json({ error: "Task not found." }, { status: 404 });
     let remote;
-    if (process.env.EXECUTION_MODE === "live" && currentTask.issueNumber) {
-      try { remote = await reconcileTaskStatus(currentProject, currentTask.issueNumber, body.status); }
+    if (process.env.EXECUTION_MODE === "live") {
+      try { remote = await syncTaskStatus(currentProject, currentTask, body.status); }
       catch (error) { return Response.json({ error: error instanceof Error ? error.message : "GitHub status synchronization failed." }, { status: 502 }); }
     }
     const task = completeTaskByHuman(taskId);
@@ -31,8 +40,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ta
     const currentTask = getTask(taskId);
     const currentProject = currentTask ? getProject(currentTask.projectId) : null;
     if (!currentTask || !currentProject) return Response.json({ error: "Task not found." }, { status: 404 });
-    if (process.env.EXECUTION_MODE === "live" && currentTask.issueNumber) {
-      try { remote = await reconcileTaskStatus(currentProject, currentTask.issueNumber, body.status); }
+    if (process.env.EXECUTION_MODE === "live") {
+      try { remote = await syncTaskStatus(currentProject, currentTask, body.status); }
       catch (error) { return Response.json({ error: error instanceof Error ? error.message : "GitHub status synchronization failed." }, { status: 502 }); }
     }
   }

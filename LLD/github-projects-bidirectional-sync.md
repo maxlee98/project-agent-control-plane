@@ -22,6 +22,13 @@ The dashboard task creation path creates a GitHub Issue but does not add that Is
 The reverse path can import Issue project items, but must be idempotent, repository-scoped, and
 preserve local execution history.
 
+The live database initially contained local task references that no longer represented Issues in the
+configured repository. Project #3 contained Issues #10, #14, and #17, while local tasks also
+referenced Issue #2 plus stale references #7, #9, #12, and #15. GitHub #9 was a Pull Request and
+#15 was not an Issue, so those numbers must not be reused as task identities. The approved live
+backfill later resolved 13 Project Issues into 13 local tasks, correcting or creating identities as
+needed and importing five Project-only Issues.
+
 ## Goals
 
 1. Make Projects V2 reads syntactically valid and diagnose invalid/inaccessible project configuration.
@@ -30,6 +37,8 @@ preserve local execution history.
 4. Synchronize Project Status and Issue open/closed lifecycle in both directions.
 5. Report partial remote success honestly when an Issue exists but Project insertion/status fails.
 6. Preserve Demo mode as local-only and preserve local task run/branch/PR history.
+7. Resolve every live local task to a real repository Issue and Project item, correcting stale
+   numbers or creating a new Issue from the local task context when no matching Issue exists.
 
 ## Non-goals
 
@@ -37,6 +46,7 @@ preserve local execution history.
 - Do not delete remote Issues, Project items, or local tasks during sync.
 - Do not invent custom Project Status options or silently treat unmapped options as successful.
 - Do not expose GitHub tokens or raw authenticated response bodies.
+- Do not repurpose Pull Requests or unrelated Issues to repair a stale local task reference.
 
 ## Existing architecture and affected boundaries
 
@@ -71,11 +81,21 @@ state is preserved while remote title, description, labels, URL, and workflow st
 dashboard task -> create Issue -> add Issue node to Project if absent
                -> set Project Status -> persist local issue number/url
 ```
-
 The add operation is duplicate-safe by checking current Project content before calling
-`addProjectV2ItemById`. If Issue creation succeeds but a later Project operation fails, persist the
-local Issue-backed task and return a warning/partial status rather than pretending both systems are
-consistent.
+`addProjectV2ItemById`. GitHub Project connections are eventually consistent after this mutation,
+so readback retries are bounded before reporting a partial failure. If Issue creation succeeds but a
+later Project operation fails, persist the local Issue link and return a warning/partial status rather
+than pretending both systems are consistent.
+
+### Existing local task backfill
+
+During a Live Project sync, each non-Demo local task is resolved before the Project snapshot is
+upserted. A valid Issue number is verified through the repository Issue API. A missing number,
+Pull Request reference, or 404 is matched by normalized title against existing Issues; if no exact
+Issue exists, a new Issue is created from the local title and description. The returned Issue
+number, URL, and Project item are then persisted idempotently. Newly added Project items receive
+the local task status once; existing Project items remain governed by the Project status source of
+truth.
 
 ### Status mapping
 
@@ -90,6 +110,7 @@ with an explicit diagnostic.
 Dashboard create -> GitHub Issue -> Project item -> Project status -> SQLite task
 Project item sync -> repository Issue lifecycle -> SQLite task upsert
 Dashboard status -> Project status + Issue state -> SQLite task status
+Live task backfill -> verified/created Issue -> Project item -> corrected SQLite Issue identity
 ```
 
 Sync is repeatable: the same Project item maps to one local task by project + Issue number, and the
@@ -107,6 +128,8 @@ same Issue maps to one Project item by Issue node ID/number.
 | Project contains other repositories or PRs | Filter by exact repository and Issue content type. |
 | Done/reopen transition | Close Issue for Done and reopen it for every non-Done local status. |
 | Demo mode | Do not call GitHub; retain current local simulation behavior. |
+| Stale local Issue number | Verify the number, reject Pull Requests, match by title, or create a new Issue; persist the returned number and URL. |
+| Existing task is not a Project item | Add it once and initialize its Project status from the local status. |
 
 Rollback reverts adapter, route, repository, tests, docs, and LLD changes. Existing remote Issues and
 Project items are not deleted by this feature.
@@ -114,7 +137,7 @@ Project items are not deleted by this feature.
 ## Validation plan
 
 1. Add mocked GraphQL/REST tests for query results, filtering, status mapping, item insertion, retry,
-   partial failure, and lifecycle transitions.
+   partial failure, lifecycle transitions, stale-number repair, and Issue creation.
 2. Reproduce the authenticated local sync with Project #3 after the fix.
 3. Run tests, typecheck, build, and diff checks through `safe-run`.
 4. Create a complete template-compliant PR and verify its remote state.
@@ -124,6 +147,8 @@ Project items are not deleted by this feature.
 - 2026-08-20: Project #3 was verified as Projects V2 with ID `PVT_kwHOA1cLdc4Bg2Pz`.
 - 2026-08-20: The 502 was traced to an unterminated GraphQL selection document, not credentials.
 - 2026-08-20: Repository Issues are the dashboard task boundary; Project Pull Requests remain excluded.
+- 2026-08-21: Live sync will backfill every local Issue-backed task into Project #3; stale or Pull Request references are repaired by exact-title matching or new Issue creation, never by reusing an unrelated number.
+- 2026-08-21: GitHub accepted Project-item mutations before the connection query exposed them; bounded readback retries were added and the live backfill completed with 13 local/remote Issue mappings.
 
 ## Completion checklist
 
@@ -132,5 +157,6 @@ Project items are not deleted by this feature.
 - [x] Bidirectional Issue/Project item sync implemented
 - [x] Tests, typecheck, build, and diff checks passed
 - [x] Authenticated sync verified against Project #3
+- [x] Existing live task Issue identities and Project membership reconciled
 - [ ] Template-compliant PR opened and verified
 - [ ] Human merge approval remains pending

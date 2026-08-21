@@ -9,6 +9,8 @@ const calls: Array<{ url: string; method: string; body: Record<string, unknown> 
 let issueState: "open" | "closed" = "open";
 let statusName = "Done";
 let addedIssue = false;
+let issueListing: Array<Record<string, unknown>> = [];
+let projectItemVisibilityDelay = 0;
 
 function response(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -45,9 +47,12 @@ globalThis.fetch = async (input, init) => {
     const query = String(body?.query ?? "");
     if (query.includes("addProjectV2ItemById")) {
       addedIssue = true;
+      projectItemVisibilityDelay = 1;
       return response({ data: { addProjectV2ItemById: { item: { id: "item-14" } } } });
     }
     if (query.includes("updateProjectV2ItemFieldValue")) return response({ data: { updateProjectV2ItemFieldValue: { projectV2Item: { id: "item-10" } } } });
+    const projectItemVisible = addedIssue && projectItemVisibilityDelay === 0;
+    if (projectItemVisibilityDelay > 0) projectItemVisibilityDelay -= 1;
     return response({ data: {
       node: {
         __typename: "ProjectV2",
@@ -58,7 +63,7 @@ globalThis.fetch = async (input, init) => {
             content: { __typename: "Issue", id: "issue-node-10", number: 10, title: "Task #10", body: "", state: issueState === "closed" ? "CLOSED" : "OPEN", url: "https://github.com/maxlee98/project-agent-control-plane/issues/10", repository: { nameWithOwner: "maxlee98/project-agent-control-plane" }, labels: { nodes: [] } },
             fieldValues: { nodes: [{ field: { id: "field-status", name: "Status" }, name: statusName, optionId: statusName === "Done" ? "option-done" : "option-progress" }] },
           },
-          ...(addedIssue ? [{
+          ...(projectItemVisible ? [{
             id: "item-14",
             content: { __typename: "Issue", id: "issue-node-14", number: 14, title: "New Issue", body: "", state: "OPEN", url: "https://github.com/maxlee98/project-agent-control-plane/issues/14", repository: { nameWithOwner: "maxlee98/project-agent-control-plane" }, labels: { nodes: [] } },
             fieldValues: { nodes: [{ field: { id: "field-status", name: "Status" }, name: "Todo", optionId: "option-todo" }] },
@@ -68,11 +73,14 @@ globalThis.fetch = async (input, init) => {
     } });
   }
 
-  if (url.endsWith("/issues/10") && method === "GET") return response({ state: issueState });
+  if (url.endsWith("/issues/10") && method === "GET") return response({ number: 10, node_id: "issue-node-10", html_url: "https://github.com/maxlee98/project-agent-control-plane/issues/10", title: "Task #10", state: issueState });
   if (url.endsWith("/issues/10") && method === "PATCH") {
     issueState = (body?.state as "open" | "closed") ?? issueState;
     return response({ state: issueState });
   }
+  if (url.includes("/issues?") && method === "GET") return response(issueListing);
+  if (url.endsWith("/issues/9") && method === "GET") return response({ number: 9, node_id: "pr-node-9", html_url: "https://github.com/maxlee98/project-agent-control-plane/pull/9", title: "Stale PR reference", pull_request: { url: "https://github.com/maxlee98/project-agent-control-plane/pull/9" }, state: "open" });
+  if (url.endsWith("/issues") && method === "POST") return response({ number: 18, node_id: "issue-node-18", html_url: "https://github.com/maxlee98/project-agent-control-plane/issues/18", title: body?.title, body: body?.body, state: "open" });
   return response({ message: "Unexpected test request" }, 404);
 };
 
@@ -86,6 +94,7 @@ test("reads Projects V2 metadata and repairs a Done issue lifecycle", async () =
   issueState = "open";
   statusName = "Done";
   addedIssue = false;
+  projectItemVisibilityDelay = 0;
   const items = await github.listProjectItems(project());
   assert.equal(items[0]?.status, "done");
   assert.equal(items[0]?.statusMapped, true);
@@ -101,8 +110,12 @@ test("updates the Projects V2 option and reopens an issue for a non-Done status"
   issueState = "closed";
   statusName = "Done";
   addedIssue = false;
-  const result = await github.reconcileTaskStatus(project(), 10, "in_progress");
-  assert.deepEqual(result, { projectChanged: true, issueChanged: true });
+  projectItemVisibilityDelay = 0;
+  issueListing = [];
+  const result = await github.reconcileTaskStatus(project(), { issueNumber: 10, title: "Task #10", description: "", githubUrl: "https://github.com/maxlee98/project-agent-control-plane/issues/10" }, "in_progress");
+  assert.equal(result.projectChanged, true);
+  assert.equal(result.issueChanged, true);
+  assert.equal(result.issueNumber, 10);
   const mutation = calls.find((call) => call.url.endsWith("/graphql") && String(call.body?.query).includes("updateProjectV2ItemFieldValue"));
   assert.equal((mutation?.body?.variables as Record<string, unknown>).optionId, "option-progress");
   assert.deepEqual(calls.at(-1)?.body, { state: "open", state_reason: "reopened" });
@@ -114,6 +127,7 @@ test("rejects missing project configuration and unmapped status options", async 
   issueState = "open";
   statusName = "Custom Review";
   addedIssue = false;
+  projectItemVisibilityDelay = 0;
   const items = await github.listProjectItems(project());
   assert.equal(items[0]?.statusMapped, false);
   await assert.rejects(() => github.reconcileProjectItemLifecycle(project(), items[0]!), /has no local workflow mapping/);
@@ -124,6 +138,8 @@ test("adds a newly created Issue to Projects V2 exactly once", async () => {
   issueState = "open";
   statusName = "Todo";
   addedIssue = false;
+  projectItemVisibilityDelay = 0;
+  issueListing = [];
   const result = await github.ensureProjectItem(project(), { number: 14, url: "https://github.com/maxlee98/project-agent-control-plane/issues/14", nodeId: "issue-node-14" });
   assert.deepEqual(result, { projectChanged: true, item: {
     projectItemId: "item-14",
@@ -145,4 +161,38 @@ test("adds a newly created Issue to Projects V2 exactly once", async () => {
   const second = await github.ensureProjectItem(project(), { number: 14, url: "https://github.com/maxlee98/project-agent-control-plane/issues/14", nodeId: "issue-node-14" });
   assert.equal(second.projectChanged, false);
   assert.equal(calls.filter((call) => String(call.body?.query).includes("addProjectV2ItemById")).length, 1);
+});
+
+test("does not reuse a Pull Request reference and creates a real Issue", async () => {
+  calls.length = 0;
+  issueState = "open";
+  statusName = "Todo";
+  addedIssue = false;
+  issueListing = [];
+  const result = await github.resolveTaskIssue(project(), {
+    issueNumber: 9,
+    title: "Repair the stale task identity",
+    description: "The local task must not point at a pull request.",
+    githubUrl: "https://github.com/maxlee98/project-agent-control-plane/issues/9",
+  });
+  assert.equal(result.created, true);
+  assert.equal(result.issue.number, 18);
+  assert.equal(result.issue.url, "https://github.com/maxlee98/project-agent-control-plane/issues/18");
+  assert.equal(calls.some((call) => call.url.endsWith("/issues/9")), true);
+  assert.equal(calls.some((call) => call.url.includes("/issues?") && call.method === "GET"), true);
+  assert.equal(calls.some((call) => call.url.endsWith("/issues") && call.method === "POST"), true);
+});
+
+test("falls back to an exact Issue title instead of reusing an unrelated number", async () => {
+  calls.length = 0;
+  issueListing = [{ number: 16, node_id: "issue-node-16", html_url: "https://github.com/maxlee98/project-agent-control-plane/issues/16", title: "Keep the exact task title", state: "open" }];
+  const result = await github.resolveTaskIssue(project(), {
+    issueNumber: 10,
+    title: "Keep the exact task title",
+    description: "",
+    githubUrl: null,
+  });
+  assert.equal(result.created, false);
+  assert.equal(result.issue.number, 16);
+  assert.equal(calls.some((call) => call.url.endsWith("/issues") && call.method === "POST"), false);
 });

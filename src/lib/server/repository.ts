@@ -153,6 +153,16 @@ export function getTaskByIssue(projectId: string, issueNumber: number) {
   return row ? mapTask(row as TaskRow) : null;
 }
 
+export function getTasksByProject(projectId: string) {
+  return db.prepare("SELECT * FROM tasks WHERE project_id = ? ORDER BY updated_at DESC").all(projectId).map((row) => mapTask(row as TaskRow));
+}
+
+export function updateTaskIssue(taskId: string, issueNumber: number, githubUrl: string) {
+  db.prepare("UPDATE tasks SET issue_number = ?, github_url = ?, updated_at = ? WHERE id = ?")
+    .run(issueNumber, githubUrl, isoNow(), taskId);
+  return getTask(taskId);
+}
+
 export function getRun(runId: string) {
   const row = db.prepare("SELECT * FROM runs WHERE id = ?").get(runId);
   return row ? mapRun(row as RunRow) : null;

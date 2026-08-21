@@ -1,4 +1,4 @@
-import { createIssue, ensureProjectItem, reconcileTaskStatus } from "@/lib/server/github";
+import { createIssue, reconcileTaskStatus } from "@/lib/server/github";
 import { createTask, getProject } from "@/lib/server/repository";
 
 export async function POST(request: Request) {
@@ -16,9 +16,12 @@ export async function POST(request: Request) {
       syncWarning = "GitHub Issue created, but this repository has no Projects V2 ID configured.";
     } else {
       try {
-        const projectItem = await ensureProjectItem(project, issue);
-        const statusSync = await reconcileTaskStatus(project, issue.number, body.status ?? "inbox");
-        remoteSync = { projectChanged: projectItem.projectChanged || statusSync.projectChanged, issueChanged: statusSync.issueChanged };
+        remoteSync = await reconcileTaskStatus(project, {
+          issueNumber: issue.number,
+          title: body.title.trim(),
+          description: body.description?.trim() ?? "",
+          githubUrl: issue.url,
+        }, body.status ?? "inbox");
       } catch (error) {
         syncWarning = `GitHub Issue created, but Projects V2 synchronization needs retry: ${error instanceof Error ? error.message : "remote synchronization failed."}`;
       }
