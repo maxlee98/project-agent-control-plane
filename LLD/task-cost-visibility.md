@@ -2,7 +2,7 @@
 
 ## Status
 
-- **Status:** In progress
+- **Status:** Complete
 - **Owner:** Project Agent Control Plane
 - **Date:** 2026-08-21
 - **Related task or issue:** [Issue #21](https://github.com/maxlee98/project-agent-control-plane/issues/21) — “There should be an associated cost for each task.”
@@ -129,4 +129,4 @@ that distinction clear.
 - [x] Implementation self-review completed
 - [x] Tests and typecheck passed; build reached prerendering but failed on an existing global-error/runtime issue
 - [x] Documentation updated
-- [ ] Handoff verified
+- [x] Handoff verified locally; PR creation remains pending because the feature branch has not been pushed
