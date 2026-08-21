@@ -3,6 +3,7 @@ import path from "node:path";
 import { addActivity, addRunEvent, createRun, getProject, getRun, getTask, updateRun, updateTask } from "./repository";
 import { createPullRequest, publishComment } from "./github";
 import { runCline, stopClineRun } from "./cline";
+import type { RunUsageSnapshot } from "./cost";
 import { commitAndPush, detectChecks, expandHome, prepareWorkspace, runChecks, type WorkspaceHandle } from "./workspaces";
 import type { AgentRun } from "../domain";
 
@@ -27,6 +28,19 @@ function livePrerequisiteError() {
   if (!process.env.CLINE_API_KEY) return "Live mode is blocked: configure CLINE_API_KEY before starting an agent.";
   if (!process.env.GITHUB_TOKEN) return "Live mode is blocked: configure GITHUB_TOKEN before a branch or PR can be published.";
   return null;
+}
+
+function persistRunUsage(runId: string, usage: RunUsageSnapshot) {
+  updateRun(runId, {
+    providerId: usage.providerId,
+    modelId: usage.modelId,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cacheReadTokens: usage.cacheReadTokens,
+    cacheWriteTokens: usage.cacheWriteTokens,
+    actualCostUsd: usage.actualCostUsd,
+    costSource: usage.costSource,
+  });
 }
 
 async function buildPrompt(projectPath: string, task: ReturnType<typeof getTask>) {
@@ -54,10 +68,13 @@ async function executeLiveRun(runId: string, taskId: string, sourceRunId?: strin
     updateTask(task.id, { branchName: workspace.branchName, summary: "Cline is working inside an isolated worktree." });
     addRunEvent(runId, workspace.reused ? "workspace_reused" : "workspace_created", workspace.reused ? "Existing isolated worktree resumed" : "Fresh isolated worktree created", workspace.workspacePath);
     const prompt = await buildPrompt(expandHome(project.localPath), task);
-    const result = await runCline({ runId, task, project, prompt, workspacePath: workspace.workspacePath }, {
+    const result = await runCline({ runId, task, project, prompt, workspacePath: workspace.workspacePath, providerId: run.providerId, modelId: run.modelId }, {
       onActivity: (message, detail) => { updateRun(runId, { progress: Math.min(68, 15 + Math.floor(Math.random() * 30)), currentActivity: message }); addRunEvent(runId, "cline", message, detail); },
       onEvent: (type, message, detail) => addRunEvent(runId, type, message, detail),
+      onUsage: (usage) => persistRunUsage(runId, usage),
     });
+    if (result.usage) persistRunUsage(runId, result.usage);
+    else updateRun(runId, { costSource: "unavailable" });
     updateRun(runId, { sessionId: result.sessionId, progress: 72, currentActivity: "Running repository validation" });
     const checks = await detectChecks(workspace.workspacePath);
     const checked = await runChecks(workspace.workspacePath, checks, (next) => updateRun(runId, { checks: next, currentActivity: next.find((check) => check.status === "running")?.command ?? "Running validation" }));
@@ -73,9 +90,19 @@ async function executeLiveRun(runId: string, taskId: string, sourceRunId?: strin
     updateRun(runId, { status: "completed", progress: 100, currentActivity: "Pull request ready for review", finishedAt: new Date().toISOString() });
     addRunEvent(runId, "handoff_complete", "Pull request created", pr.url);
     addActivity({ projectId: project.id, taskId: task.id, runId, type: "pull_request", title: "Live PR ready for review", detail: `${handoff.changedFiles.length} changed files · ${handoff.sha.slice(0, 8)}`, tone: "violet" });
-    if (task.issueNumber) await publishComment(project.fullName, task.issueNumber, `Agent handoff is ready.\n\nPR: ${pr.url}\nCommit: ${handoff.sha}\nChanged files: ${handoff.changedFiles.length}\nChecks: ${checked.filter((check) => check.status === "passed").length}/${checked.length} passed.`);
+    if (task.issueNumber) {
+      try {
+        await publishComment(project.fullName, task.issueNumber, `Agent handoff is ready.\n\nPR: ${pr.url}\nCommit: ${handoff.sha}\nChanged files: ${handoff.changedFiles.length}\nChecks: ${checked.filter((check) => check.status === "passed").length}/${checked.length} passed.`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "The Issue handoff comment could not be published.";
+        addRunEvent(runId, "handoff_comment_failed", "Pull request ready; Issue update failed", message);
+        addActivity({ projectId: project.id, taskId: task.id, runId, type: "handoff_warning", title: "Pull request ready; Issue update failed", detail: message, tone: "amber" });
+      }
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Live agent failed unexpectedly.";
+    const failedRun = getRun(runId);
+    if (failedRun?.costSource === "pending") updateRun(runId, { costSource: "unavailable" });
     updateRun(runId, { status: "failed", currentActivity: "Live run failed", error: message, finishedAt: new Date().toISOString() });
     updateTask(task.id, { status: "blocked", agentState: "failed", summary: message });
     addRunEvent(runId, "run_failed", "Live run failed", message);
