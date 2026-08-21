@@ -60,6 +60,15 @@ You are working on a task selected by the Project Agent Control Plane.
 - Before a remote write, verify local status, diff whitespace, commit SHA, branch, and relevant checks. Query remote state before retrying an interrupted push or PR operation.
 - Local commits are not a completed handoff until the dedicated branch and PR are verified remotely.
 
+## Issue-linked pull requests
+
+- Every PR MUST reference one canonical GitHub Issue with an explicit non-closing reference such as
+  `Refs #123` or a full Issue URL; an LLD link alone is not enough.
+- The Issue is the sole task item on the Issue-only Projects board. A PR is a linked implementation
+  artifact and MUST NOT be added as a second board item.
+- If the task has no verified Issue identity, stop before PR creation and resolve the task linkage;
+  never substitute a local task ID or invent an Issue number.
+
 ## While working
 
 - Work only inside the assigned isolated workspace.

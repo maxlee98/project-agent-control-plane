@@ -301,8 +301,9 @@ export async function reconcileResolvedTaskStatus(project: Project, issue: Resol
 }
 
 export async function createPullRequest(fullName: string, task: Task, run: AgentRun) {
+  if (!task.issueNumber) throw new Error("Cannot create a pull request without a canonical GitHub Issue.");
   const { owner, repo } = repoParts(fullName);
-  const body = await readResponse(await githubRequest(`/repos/${owner}/${repo}/pulls`, { method: "POST", body: JSON.stringify({ title: task.title, head: run.branchName, base: process.env.GITHUB_DEFAULT_BRANCH ?? "main", body: `Automated handoff for task ${task.issueNumber ? `#${task.issueNumber}` : task.id}.\n\n${task.currentSummary}\n\nCommit: ${run.commitSha ?? "not recorded"}` }) }));
+  const body = await readResponse(await githubRequest(`/repos/${owner}/${repo}/pulls`, { method: "POST", body: JSON.stringify({ title: task.title, head: run.branchName, base: process.env.GITHUB_DEFAULT_BRANCH ?? "main", body: `Refs #${task.issueNumber}\n\nAutomated handoff for task #${task.issueNumber}.\n\n${task.currentSummary}\n\nCommit: ${run.commitSha ?? "not recorded"}` }) }));
   return { url: String(body.html_url), number: Number(body.number) };
 }
 
