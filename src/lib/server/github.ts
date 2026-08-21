@@ -53,6 +53,16 @@ type IssueApiRecord = {
   pull_request?: unknown;
 };
 
+type PullRequestApiRecord = {
+  number?: number;
+  html_url?: string;
+};
+
+type PullRequestReference = {
+  number: number;
+  url: string;
+};
+
 export type ResolvedIssue = {
   number: number;
   url: string;
@@ -303,8 +313,29 @@ export async function reconcileResolvedTaskStatus(project: Project, issue: Resol
 export async function createPullRequest(fullName: string, task: Task, run: AgentRun) {
   if (!task.issueNumber) throw new Error("Cannot create a pull request without a canonical GitHub Issue.");
   const { owner, repo } = repoParts(fullName);
-  const body = await readResponse(await githubRequest(`/repos/${owner}/${repo}/pulls`, { method: "POST", body: JSON.stringify({ title: task.title, head: run.branchName, base: process.env.GITHUB_DEFAULT_BRANCH ?? "main", body: `Refs #${task.issueNumber}\n\nAutomated handoff for task #${task.issueNumber}.\n\n${task.currentSummary}\n\nCommit: ${run.commitSha ?? "not recorded"}` }) }));
-  return { url: String(body.html_url), number: Number(body.number) };
+  const head = run.branchName?.trim();
+  const base = process.env.GITHUB_DEFAULT_BRANCH ?? "main";
+  if (!head) throw new Error("Cannot create a pull request without a task branch.");
+  const existing = await findOpenPullRequest(owner, repo, head, base);
+  if (existing) return existing;
+
+  const response = await githubRequest(`/repos/${owner}/${repo}/pulls`, { method: "POST", body: JSON.stringify({ title: task.title, head, base, body: `Fixes #${task.issueNumber}\n\n${task.currentSummary}\n\nCommit: ${run.commitSha ?? "not recorded"}` }) });
+  if (response.status === 422) {
+    const createdByRetry = await findOpenPullRequest(owner, repo, head, base);
+    if (createdByRetry) return createdByRetry;
+  }
+  const body = await readResponse<PullRequestApiRecord>(response);
+  const number = Number(body.number);
+  const url = String(body.html_url ?? "");
+  if (!Number.isInteger(number) || number <= 0 || !url) throw new Error("GitHub created the pull request but returned incomplete metadata.");
+  return { url, number };
+}
+
+async function findOpenPullRequest(owner: string, repo: string, head: string, base: string): Promise<PullRequestReference | null> {
+  const records = await readResponse<PullRequestApiRecord[]>(await githubRequest(`/repos/${owner}/${repo}/pulls?head=${encodeURIComponent(`${owner}:${head}`)}&base=${encodeURIComponent(base)}&state=open&per_page=10`));
+  const match = records.find((record) => Number.isInteger(Number(record.number)) && Number(record.number) > 0 && Boolean(record.html_url));
+  if (!match) return null;
+  return { number: Number(match.number), url: String(match.html_url) };
 }
 
 export async function publishComment(fullName: string, issueNumber: number, body: string) {

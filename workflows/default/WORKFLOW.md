@@ -62,8 +62,9 @@ You are working on a task selected by the Project Agent Control Plane.
 
 ## Issue-linked pull requests
 
-- Every PR MUST reference one canonical GitHub Issue with an explicit non-closing reference such as
-  `Refs #123` or a full Issue URL; an LLD link alone is not enough.
+- Every PR MUST explicitly link one canonical GitHub Issue with `Fixes #123` or `Closes #123`; an
+  LLD link or ordinary Issue mention alone is not enough. The closing keyword intentionally closes
+  the Issue when the PR merges so the Issue-only Project item can move to Done.
 - The Issue is the sole task item on the Issue-only Projects board. A PR is a linked implementation
   artifact and MUST NOT be added as a second board item.
 - If the task has no verified Issue identity, stop before PR creation and resolve the task linkage;

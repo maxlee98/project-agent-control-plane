@@ -116,9 +116,10 @@ task-scoped branch when needed.
 Every PR must use `.github/pull_request_template.md`, link the control-plane task and its LLD, and
 describe the problem, goals, design, affected boundaries, validation results, security review,
 risks, and follow-ups. Verify local checks and remote branch/PR state before reporting handoff.
-Every PR must also link one canonical GitHub Issue with a non-closing reference such as `Refs #123`
-or a full Issue URL. The Issue remains the sole task item on the Issue-only Projects board; the PR is
-linked implementation work and is not added as a second board item.
+Every PR must also explicitly link one canonical GitHub Issue with `Fixes #123` or `Closes #123`.
+The closing keyword creates the GitHub Development relationship and closes the Issue when the PR is
+merged, allowing the existing Issue-only Projects board item to move to Done. The PR is linked
+implementation work and is not added as a second board item.
 Merging remains a human decision; agents must not merge automatically.
 
 ## Current implementation status

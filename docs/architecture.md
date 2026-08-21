@@ -28,9 +28,10 @@ Human workflow status changes in Live mode reconcile the GitHub Projects V2 item
 before updating the local projection. Sync reads Projects V2 status, repairs the derived issue
 open/closed lifecycle, and then upserts SQLite. Missing project IDs, unsupported custom status
 options, and remote mutation failures are surfaced instead of reported as successful syncs.
-Every implementation PR must reference its canonical GitHub Issue with a non-closing `Refs #<number>`
-or Issue URL. The Issue is the sole task item on the Issue-only Project board; PRs are linked
-implementation artifacts and are not added as separate task items.
+Every implementation PR must explicitly link its canonical GitHub Issue with `Fixes #<number>` or
+`Closes #<number>`. The closing keyword creates the GitHub Development relationship and closes the
+Issue on merge; the Issue is the sole task item on the Issue-only Project board, and PRs are linked
+implementation artifacts rather than separate task items.
 
 ## Integration seams
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-- **Status:** Implemented; pending human review and merge
+- **Status:** Repair and handoff-linkage correction implemented; pending human review and merge
 - **Owner:** Project Agent Control Plane
 - **Date:** 2026-08-21
 - **Related task or issue:** [Issue #21](https://github.com/maxlee98/project-agent-control-plane/issues/21) — “There should be an associated cost for each task.”
@@ -14,6 +14,12 @@ implementation only stores a manually entered estimate. It does not account for 
 usage, so the dashboard cannot answer how much an agent run actually cost. The installed Cline SDK
 provides normalized session usage and model-catalog pricing, but the current adapter drops both and
 therefore cannot account for model changes or aggregate retries and continuations safely.
+
+The first live Task #21 run reached the implementation handoff and created PR #31, but the final
+Issue-comment request returned `GitHub API 422: Validation Failed`. The orchestrator then converted
+the already completed run into `failed` and the task into `blocked`; a retry could also receive the
+same 422 when attempting to create another PR for the existing branch. Cost accounting must survive
+this handoff boundary so a task retains the usage captured before the optional comment operation.
 
 ## Goals
 
@@ -30,7 +36,8 @@ therefore cannot account for model changes or aggregate retries and continuation
 
 - Do not present a manual estimate as provider-billed actual spend.
 - Do not add credentials, billing APIs, or a new external pricing service.
-- Do not change run dispatch, GitHub synchronization, or task workflow behavior.
+- Do not change run dispatch, GitHub synchronization, or task workflow behavior except to preserve a
+  completed handoff when its optional Issue comment fails after the PR and cost are persisted.
 - Do not redesign unrelated dashboard surfaces.
 
 ## Requirements and acceptance criteria
@@ -58,7 +65,12 @@ therefore cannot account for model changes or aggregate retries and continuation
 - `src/lib/server/repository.ts` maps and persists tasks.
 - `src/lib/server/cost.ts` — exact USD parsing and provider/model usage pricing helpers.
 - `src/lib/server/cline.ts` — translates Cline usage into the normalized run accounting record.
-- `src/lib/server/orchestrator.ts` — persists usage after normal, failed, and stopped live runs.
+- `src/lib/server/github.ts` — idempotent PR lookup/recovery during the final handoff.
+- `.github/pull_request_template.md`, `scripts/pr-template.mjs`, and repository workflow guidance —
+  require explicit `Fixes`/`Closes` Issue linkage for the review handoff.
+- `src/lib/server/orchestrator.ts` — persists usage after normal, failed, and stopped live runs;
+  keeps a completed, cost-bearing handoff completed when the optional Issue comment fails and records
+  the warning in run/activity history.
 - `src/app/api/tasks/route.ts` validates task creation input.
 - `src/app/api/tasks/[taskId]/route.ts` validates task updates.
 - `src/components/ControlPlane.tsx` renders cards, the task detail rail, and task creation UI.
@@ -91,6 +103,7 @@ cost” so neither is confused with the other.
 - `src/lib/server/repository.ts` — map, create, and update costs.
 - `src/lib/server/cost.ts` — exact estimate parsing and model-pricing calculation.
 - `src/lib/server/cline.ts` — usage extraction from ClineCore.
+- `src/lib/server/github.ts` — idempotent PR lookup/recovery during the final handoff.
 - `src/lib/server/orchestrator.ts` — live-run usage persistence.
 - `src/app/api/tasks/route.ts` — validate create cost input.
 - `src/app/api/tasks/[taskId]/route.ts` — validate update cost input.
@@ -108,6 +121,10 @@ cost” so neither is confused with the other.
 - Provider catalog pricing can become stale or differ from an invoice. Preserve the pricing source,
   provider, and model with each run and label catalog-derived values; prefer the SDK-reported total.
 - A run with tokens but no known pricing is not silently recorded as `$0.00`; it remains unavailable.
+- A post-handoff Issue comment can fail after the PR and cost are persisted; keep the task review-ready,
+  record the warning, and allow a later handoff retry rather than marking the run failed.
+- A retry can race with an already-created PR; read back the existing open PR after a duplicate-create
+  validation response instead of failing the task handoff.
 
 ## Validation plan
 
@@ -127,6 +144,11 @@ cost” so neither is confused with the other.
   changes affect only new usage; prior runs are never re-priced.
 - 2026-08-21: Prefer `ClineCore.getAccumulatedUsage` as the actual-cost source, use SDK catalog rates
   only as a fallback, and show missing pricing as unavailable.
+- 2026-08-21: A live Task #21 run failed after PR creation because the final Issue comment returned
+  HTTP 422. Preserve completed run/cost state, record the comment failure as a warning, and make PR
+  creation idempotent for retries.
+- 2026-08-21: Generated implementation PRs use one `Fixes #<issue-number>` token, matching the
+  repository’s closing-linkage policy and avoiding duplicate Issue mentions in the handoff body.
 
 ## Open questions and assumptions
 
@@ -138,13 +160,22 @@ cost” so neither is confused with the other.
 ## Validation results
 
 - `node --experimental-strip-types --experimental-loader ./tests/extensionless-loader.mjs --test tests/task-cost.test.ts`: passed; 5 tests passed, 0 failed.
-- `npm test`: passed; 31 tests passed, 0 failed.
+- `node --experimental-strip-types --experimental-loader ./tests/extensionless-loader.mjs --test tests/github-status-sync.test.ts`: passed; 10 tests passed, 0 failed, including closing Issue linkage, existing-PR reuse, and duplicate-create recovery.
+- `npm test`: passed; 35 tests passed, 0 failed.
 - `npm run typecheck`: passed.
 - `npm run build`: passed; all routes compiled and prerendered. The existing Turbopack NFT tracing
   warning remains; no task-cost-specific warning was reported.
+- `node scripts/verify-hard-stop.mjs`: passed.
 - `git diff --check`: passed.
 - Security requirement: no credentials, billing API calls, or sensitive raw usage payloads may be
   persisted or added to GitHub comments.
+- Handoff repair requirement: a failed optional Issue comment must not replace a completed run’s
+  persisted provider/model/token/cost snapshot or task aggregation.
+- Handoff linkage requirement: the existing PR must be updated with a template-compliant `Fixes #21`
+  reference and verified by GitHub as closing canonical Issue #21.
+- Remote handoff verification: PR #34 is open at https://github.com/maxlee98/project-agent-control-plane/pull/34,
+  targets `main` from `fix/task-21-cost-run-handoff`, passes the remote template verifier, and GitHub
+  parses Issue #21 as its closing reference.
 
 ## Completion checklist
 
@@ -153,4 +184,6 @@ cost” so neither is confused with the other.
 - [x] Implementation self-review completed
 - [x] Tests, typecheck, build, and diff checks rerun for the repair
 - [x] Documentation updated
-- [x] Handoff verified: commit `d3bc890e0ccb6a9459dc8a0097d1e003c371fe0d`, branch `agent/21-There-should-be-an-associated-cost-a2d20ec9`, PR #31 open at https://github.com/maxlee98/project-agent-control-plane/pull/31; fresh CI and PR-template checks passed
+- [x] Original implementation handoff verified: commit `d3bc890e0ccb6a9459dc8a0097d1e003c371fe0d`, branch `agent/21-There-should-be-an-associated-cost-a2d20ec9`, PR #31 merged at https://github.com/maxlee98/project-agent-control-plane/pull/31; the observed post-handoff 422 repair is covered on the follow-up branch
+- [x] Repository handoff policy corrected from `Refs` to explicit `Fixes`/`Closes` linkage
+- [x] Existing PR #34 updated and verified with GitHub closing Issue #21
