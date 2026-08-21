@@ -77,7 +77,7 @@ event.
 | `run_completed`, `run_failed`, `run_stopped` | Agent/run terminal observations | Existing host policy only |
 | `handoff_complete` | PR handoff persisted | Existing final handoff comment only |
 | `stage_started`, `stage_failed` | Orchestrator boundary diagnostics | Local only |
-| `handoff_comment_failed`, `checkpoint_publish_failed` | Non-fatal host-side publication warning | Local warning |
+| `handoff_comment_failed`, `issue_checkpoint_failed`, `checkpoint_publish_failed` | Non-fatal host-side publication warning | Local warning |
 | `unknown` | Safe diagnostic for unsupported source data | Local only |
 
 The `checkpoint` flag on an in-memory draft identifies meaningful milestones for orchestration

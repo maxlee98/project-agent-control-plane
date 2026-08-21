@@ -39,6 +39,7 @@ export type RunEventType =
   | "stage_started"
   | "stage_failed"
   | "handoff_comment_failed"
+  | "issue_checkpoint_failed"
   | "checkpoint_publish_failed"
   | "unknown";
 
@@ -72,6 +73,7 @@ const RUN_EVENT_TYPES = new Set<RunEventType>([
   "stage_started",
   "stage_failed",
   "handoff_comment_failed",
+  "issue_checkpoint_failed",
   "checkpoint_publish_failed",
   "unknown",
 ]);
