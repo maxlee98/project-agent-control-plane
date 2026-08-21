@@ -3,7 +3,7 @@ import { db } from "./db";
 import { redactSecrets } from "./redaction";
 import { normalizeLocalPath } from "./paths";
 import { hasActiveClineSession } from "./cline";
-import type { ActivityItem, AgentRun, DashboardData, Project, RunCheck, RunEvent, Task, TaskStatus } from "../domain";
+import type { ActivityItem, AgentRun, DashboardData, Project, RunCheck, RunCostSource, RunEvent, Task, TaskCostStatus, TaskStatus } from "../domain";
 
 type ProjectRow = Record<string, unknown>;
 type TaskRow = Record<string, unknown>;
@@ -42,12 +42,28 @@ export function mapProject(row: ProjectRow): Project {
 }
 
 export function mapTask(row: TaskRow): Task {
+  const runCount = Number(row.run_count ?? 0);
+  const pricedRunCount = Number(row.priced_run_count ?? 0);
+  const pendingRunCount = Number(row.pending_run_count ?? 0);
+  const actualCostMicros = row.actual_cost_micros === null || row.actual_cost_micros === undefined ? null : Number(row.actual_cost_micros);
+  const actualCostStatus: TaskCostStatus = runCount === 0
+    ? "not_started"
+    : pendingRunCount > 0
+      ? "pending"
+      : pricedRunCount === runCount
+        ? "available"
+        : pricedRunCount > 0
+          ? "partial"
+          : "unavailable";
   return {
     id: String(row.id),
     projectId: String(row.project_id),
     issueNumber: row.issue_number === null ? null : Number(row.issue_number),
     title: String(row.title),
     description: String(row.description ?? ""),
+    estimatedCostUsd: Number(row.estimated_cost_cents ?? 0) / 100,
+    actualCostUsd: actualCostMicros === null ? null : actualCostMicros / 1_000_000,
+    actualCostStatus,
     status: row.status as TaskStatus,
     priority: Number(row.priority) as Task["priority"],
     labels: fromJson(row.labels_json),
@@ -80,6 +96,14 @@ export function mapRun(row: RunRow): AgentRun {
     finishedAt: row.finished_at ? String(row.finished_at) : null,
     error: row.error ? String(row.error) : null,
     executionMode,
+    providerId: String(row.provider_id ?? ""),
+    modelId: String(row.model_id ?? ""),
+    inputTokens: Number(row.input_tokens ?? 0),
+    outputTokens: Number(row.output_tokens ?? 0),
+    cacheReadTokens: Number(row.cache_read_tokens ?? 0),
+    cacheWriteTokens: Number(row.cache_write_tokens ?? 0),
+    actualCostUsd: row.actual_cost_micros === null || row.actual_cost_micros === undefined ? null : Number(row.actual_cost_micros) / 1_000_000,
+    costSource: row.cost_source as RunCostSource,
     isActive: executionMode === "live" && (status === "queued" || status === "running") && hasActiveClineSession(String(row.id)),
     commitSha: row.commit_sha ? String(row.commit_sha) : null,
     changedFiles: fromJson(row.changed_files_json),
@@ -111,7 +135,7 @@ export function getDashboard(): DashboardData {
     WHERE (? = 'demo' OR p.is_demo = 0)
     GROUP BY p.id ORDER BY p.name
   `).all(executionMode);
-  const tasks = db.prepare("SELECT t.* FROM tasks t JOIN projects p ON p.id = t.project_id WHERE (? = 'demo' OR p.is_demo = 0) ORDER BY t.updated_at DESC").all(executionMode).map((row) => mapTask(row as TaskRow));
+  const tasks = db.prepare("SELECT t.*, SUM(r.actual_cost_micros) AS actual_cost_micros, COUNT(r.id) AS run_count, COUNT(r.actual_cost_micros) AS priced_run_count, SUM(CASE WHEN r.cost_source = 'pending' THEN 1 ELSE 0 END) AS pending_run_count FROM tasks t JOIN projects p ON p.id = t.project_id LEFT JOIN runs r ON r.task_id = t.id WHERE (? = 'demo' OR p.is_demo = 0) GROUP BY t.id ORDER BY t.updated_at DESC").all(executionMode).map((row) => mapTask(row as TaskRow));
   const runs = db.prepare("SELECT r.* FROM runs r JOIN projects p ON p.id = r.project_id WHERE (? = 'demo' OR p.is_demo = 0) ORDER BY r.started_at DESC LIMIT 40").all(executionMode).map((row) => mapRun(row as RunRow));
   const activeLiveRuns = runs.filter((run) => run.isActive);
   const activeCounts = new Map<string, number>();
@@ -144,17 +168,17 @@ export function getDashboard(): DashboardData {
 }
 
 export function getTask(taskId: string) {
-  const row = db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId);
+  const row = db.prepare("SELECT t.*, SUM(r.actual_cost_micros) AS actual_cost_micros, COUNT(r.id) AS run_count, COUNT(r.actual_cost_micros) AS priced_run_count, SUM(CASE WHEN r.cost_source = 'pending' THEN 1 ELSE 0 END) AS pending_run_count FROM tasks t LEFT JOIN runs r ON r.task_id = t.id WHERE t.id = ? GROUP BY t.id").get(taskId);
   return row ? mapTask(row as TaskRow) : null;
 }
 
 export function getTaskByIssue(projectId: string, issueNumber: number) {
-  const row = db.prepare("SELECT * FROM tasks WHERE project_id = ? AND issue_number = ?").get(projectId, issueNumber);
+  const row = db.prepare("SELECT t.*, SUM(r.actual_cost_micros) AS actual_cost_micros, COUNT(r.id) AS run_count, COUNT(r.actual_cost_micros) AS priced_run_count, SUM(CASE WHEN r.cost_source = 'pending' THEN 1 ELSE 0 END) AS pending_run_count FROM tasks t LEFT JOIN runs r ON r.task_id = t.id WHERE t.project_id = ? AND t.issue_number = ? GROUP BY t.id").get(projectId, issueNumber);
   return row ? mapTask(row as TaskRow) : null;
 }
 
 export function getTasksByProject(projectId: string) {
-  return db.prepare("SELECT * FROM tasks WHERE project_id = ? ORDER BY updated_at DESC").all(projectId).map((row) => mapTask(row as TaskRow));
+  return db.prepare("SELECT t.*, SUM(r.actual_cost_micros) AS actual_cost_micros, COUNT(r.id) AS run_count, COUNT(r.actual_cost_micros) AS priced_run_count, SUM(CASE WHEN r.cost_source = 'pending' THEN 1 ELSE 0 END) AS pending_run_count FROM tasks t LEFT JOIN runs r ON r.task_id = t.id WHERE t.project_id = ? GROUP BY t.id ORDER BY t.updated_at DESC").all(projectId).map((row) => mapTask(row as TaskRow));
 }
 
 export function updateTaskIssue(taskId: string, issueNumber: number, githubUrl: string) {
@@ -199,13 +223,13 @@ export function createProject(input: { fullName: string; localPath: string; desc
   return mapProject(db.prepare("SELECT * FROM projects WHERE id = ?").get(id) as ProjectRow);
 }
 
-export function createTask(input: { projectId: string; title: string; description?: string; status?: TaskStatus; priority?: number; labels?: string[]; issueNumber?: number; githubUrl?: string | null }) {
+export function createTask(input: { projectId: string; title: string; description?: string; estimatedCostCents?: number; status?: TaskStatus; priority?: number; labels?: string[]; issueNumber?: number; githubUrl?: string | null }) {
   const now = isoNow();
   const id = `task-${randomUUID()}`;
   db.prepare(`
-    INSERT INTO tasks (id, project_id, issue_number, title, description, status, priority, labels_json, assignee, agent_state, current_summary, github_url, updated_at, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 'idle', ?, ?, ?, ?)
-  `).run(id, input.projectId, input.issueNumber ?? null, input.title, input.description ?? "", input.status ?? "inbox", input.priority ?? 3, json(input.labels), "New task — ready for context.", input.githubUrl ?? null, now, now);
+    INSERT INTO tasks (id, project_id, issue_number, title, description, estimated_cost_cents, status, priority, labels_json, assignee, agent_state, current_summary, github_url, updated_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'idle', ?, ?, ?, ?)
+  `).run(id, input.projectId, input.issueNumber ?? null, input.title, input.description ?? "", input.estimatedCostCents ?? 0, input.status ?? "inbox", input.priority ?? 3, json(input.labels), "New task — ready for context.", input.githubUrl ?? null, now, now);
   addActivity({ projectId: input.projectId, taskId: id, type: "task", title: "Task created", detail: input.title, tone: "cyan" });
   return getTask(id);
 }
@@ -218,14 +242,14 @@ export function upsertSyncedTask(input: { projectId: string; issueNumber: number
   return getTask(existing.id);
 }
 
-export function updateTask(taskId: string, input: { status?: TaskStatus; priority?: number; title?: string; description?: string; summary?: string; agentState?: Task["agentState"]; branchName?: string | null; prUrl?: string | null }) {
+export function updateTask(taskId: string, input: { status?: TaskStatus; priority?: number; title?: string; description?: string; estimatedCostCents?: number; summary?: string; agentState?: Task["agentState"]; branchName?: string | null; prUrl?: string | null }) {
   const task = getTask(taskId);
   if (!task) return null;
   const provided = Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
-  const next = { ...task, ...provided, updatedAt: isoNow() };
+  const next = { ...task, ...provided, estimatedCostUsd: input.estimatedCostCents === undefined ? task.estimatedCostUsd : input.estimatedCostCents / 100, updatedAt: isoNow() };
   db.prepare(`
-    UPDATE tasks SET title = ?, description = ?, status = ?, priority = ?, agent_state = ?, current_summary = ?, branch_name = ?, pr_url = ?, updated_at = ? WHERE id = ?
-  `).run(next.title, next.description, next.status, next.priority, next.agentState, next.currentSummary, next.branchName, next.prUrl, next.updatedAt, taskId);
+    UPDATE tasks SET title = ?, description = ?, estimated_cost_cents = ?, status = ?, priority = ?, agent_state = ?, current_summary = ?, branch_name = ?, pr_url = ?, updated_at = ? WHERE id = ?
+  `).run(next.title, next.description, Math.round(next.estimatedCostUsd * 100), next.status, next.priority, next.agentState, next.currentSummary, next.branchName, next.prUrl, next.updatedAt, taskId);
   return getTask(taskId);
 }
 
@@ -274,21 +298,25 @@ export function createRun(input: { taskId: string; mode: AgentRun["mode"] }) {
   const now = isoNow();
   const id = `run-${randomUUID()}`;
   const executionMode = process.env.EXECUTION_MODE === "live" ? "live" : "demo";
-  db.prepare(`INSERT INTO runs (id, task_id, project_id, mode, status, progress, current_activity, started_at, execution_mode) VALUES (?, ?, ?, ?, 'queued', 0, 'Queued for dispatch', ?, ?)`)
-    .run(id, task.id, task.projectId, input.mode, now, executionMode);
+  const providerId = process.env.CLINE_PROVIDER_ID ?? "anthropic";
+  const modelId = process.env.CLINE_MODEL_ID ?? "claude-sonnet-4-5";
+  const costSource = executionMode === "live" ? "pending" : "unavailable";
+  db.prepare(`INSERT INTO runs (id, task_id, project_id, mode, status, progress, current_activity, started_at, execution_mode, provider_id, model_id, cost_source) VALUES (?, ?, ?, ?, 'queued', 0, 'Queued for dispatch', ?, ?, ?, ?, ?)`)
+    .run(id, task.id, task.projectId, input.mode, now, executionMode, providerId, modelId, costSource);
   updateTask(task.id, { status: "in_progress", agentState: "running", summary: "Agent is preparing an isolated workspace." });
   addActivity({ projectId: task.projectId, taskId: task.id, runId: id, type: "run_started", title: `${input.mode === "start" ? "Agent started" : "Agent continued"}`, detail: task.title, tone: "amber" });
   addRunEvent(id, "run_started", "Run claimed by the local orchestrator", "Workspace and workflow preparation are next.");
   return mapRun(db.prepare("SELECT * FROM runs WHERE id = ?").get(id) as RunRow);
 }
 
-export function updateRun(runId: string, input: Partial<Pick<AgentRun, "status" | "sessionId" | "branchName" | "workspacePath" | "progress" | "currentActivity" | "finishedAt" | "error" | "commitSha" | "changedFiles" | "checks">>) {
+export function updateRun(runId: string, input: Partial<Pick<AgentRun, "status" | "sessionId" | "branchName" | "workspacePath" | "progress" | "currentActivity" | "finishedAt" | "error" | "commitSha" | "changedFiles" | "checks" | "providerId" | "modelId" | "inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheWriteTokens" | "actualCostUsd" | "costSource">>) {
   const run = db.prepare("SELECT * FROM runs WHERE id = ?").get(runId) as RunRow | undefined;
   if (!run) return null;
   const current = mapRun(run);
   const next = { ...current, ...input };
-  db.prepare(`UPDATE runs SET status = ?, session_id = ?, branch_name = ?, workspace_path = ?, progress = ?, current_activity = ?, finished_at = ?, error = ?, commit_sha = ?, changed_files_json = ?, checks_json = ? WHERE id = ?`)
-    .run(next.status, next.sessionId, next.branchName, next.workspacePath, next.progress, next.currentActivity, next.finishedAt, next.error, next.commitSha, json(next.changedFiles), json(next.checks), runId);
+  const actualCostMicros = next.actualCostUsd === null ? null : next.actualCostUsd === undefined ? null : Math.round(next.actualCostUsd * 1_000_000);
+  db.prepare(`UPDATE runs SET status = ?, session_id = ?, branch_name = ?, workspace_path = ?, progress = ?, current_activity = ?, finished_at = ?, error = ?, commit_sha = ?, changed_files_json = ?, checks_json = ?, provider_id = ?, model_id = ?, input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, cache_write_tokens = ?, actual_cost_micros = ?, cost_source = ? WHERE id = ?`)
+    .run(next.status, next.sessionId, next.branchName, next.workspacePath, next.progress, next.currentActivity, next.finishedAt, next.error, next.commitSha, json(next.changedFiles), json(next.checks), next.providerId, next.modelId, next.inputTokens, next.outputTokens, next.cacheReadTokens, next.cacheWriteTokens, actualCostMicros, next.costSource, runId);
   return mapRun(db.prepare("SELECT * FROM runs WHERE id = ?").get(runId) as RunRow);
 }
 
