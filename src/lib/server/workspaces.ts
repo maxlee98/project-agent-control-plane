@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import type { Project, RunCheck, Task } from "../domain";
 import { validationEnvironment } from "./validation";
+import { redactSecrets } from "./redaction";
 
 const execFile = promisify(execFileCallback);
 
@@ -103,10 +104,10 @@ export async function runChecks(workspacePath: string, checks: RunCheck[], onUpd
     try {
       const [command, ...args] = check.command.split(" ");
       const result = await execFile(command, args, { cwd: workspacePath, env: childEnvironment, timeout: 10 * 60_000, maxBuffer: 4 * 1024 * 1024 });
-      results[index] = { ...check, status: "passed", output: `${result.stdout}${result.stderr}`.slice(-4000), durationMs: Date.now() - started };
+      results[index] = { ...check, status: "passed", output: redactSecrets(`${result.stdout}${result.stderr}`.slice(-4000)) ?? "", durationMs: Date.now() - started };
     } catch (error) {
       const detail = error as { stdout?: string; stderr?: string; message?: string };
-      results[index] = { ...check, status: "failed", output: `${detail.stdout ?? ""}${detail.stderr ?? ""}${detail.message ?? ""}`.slice(-4000), durationMs: Date.now() - started };
+      results[index] = { ...check, status: "failed", output: redactSecrets(`${detail.stdout ?? ""}${detail.stderr ?? ""}${detail.message ?? ""}`.slice(-4000)) ?? "", durationMs: Date.now() - started };
       onUpdate([...results]);
       return results;
     }
