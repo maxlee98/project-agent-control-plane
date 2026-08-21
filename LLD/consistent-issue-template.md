@@ -97,7 +97,7 @@ existing Issue, local task, project item, or API contract is mutated by the temp
 - [x] Implementation self-review completed
 - [ ] Tests, typecheck, and build passed (build has an unrelated pre-existing prerender failure; see validation results)
 - [x] Documentation updated
-- [ ] Handoff verified
+- [x] Handoff verified
 
 ## Validation results
 - `npm run safe:run -- --timeout-ms 120000 -- node --experimental-strip-types --experimental-loader ./tests/extensionless-loader.mjs --test tests/issue-template.test.ts` — passed, 2 tests.
@@ -106,3 +106,4 @@ existing Issue, local task, project item, or API contract is mutated by the temp
 - `npm run safe:run -- --timeout-ms 120000 -- npm test` — passed, 28 tests.
 - `npm run safe:run -- --timeout-ms 120000 -- npm run typecheck` — passed.
 - `npm run safe:run -- --timeout-ms 120000 -- npm run build` — failed during existing page prerendering with `TypeError: Cannot read properties of null (reading 'useContext')` for `/_global-error`; compilation and TypeScript completed successfully. The output also includes existing NFT tracing and React key warnings.
+- Pull request #32 — verified open at `https://github.com/maxlee98/project-agent-control-plane/pull/32`, base `main`, head `agent/19-Create-a-template-for-issues-creat-4de05846`, with the complete PR template body and `Refs #19` linkage. Required CI checks were still pending at handoff.
