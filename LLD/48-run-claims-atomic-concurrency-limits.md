@@ -166,6 +166,7 @@ can drop only claim enforcement after backing up local data if necessary.
   This is unrelated to the claim code and remains for human review.
 - `npm install`: completed to restore the isolated workspace dependencies; npm reported the existing
   Node 23 engine warnings and audit findings. No dependency manifests changed.
-- Branch state: `dbcf567` contains the task commit and merge update; `origin/main...HEAD` is `0/2`
-  (fresh locally), but no remote push or PR write has been attempted because the current run is not
+- Branch state: `61965f8` contains the task commit, merge update, and validation record; local
+  `origin/main...HEAD` is `0/4`. The remote freshness verifier returned 404 because this feature branch
+  has not been pushed; no remote push or PR write has been attempted because the current run is not
   authorized to publish external changes.
