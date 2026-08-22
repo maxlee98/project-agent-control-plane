@@ -18,6 +18,7 @@ export type IconName =
   | "layers"
   | "link"
   | "loader"
+  | "maximize"
   | "pause"
   | "plus"
   | "refresh"
@@ -49,6 +50,7 @@ export function Icon({ name, size = 18, strokeWidth = 1.8, ...props }: { name: I
     case "layers": return <svg {...common}><path d="m12 3 9 5-9 5-9-5 9-5Z" /><path d="m3 12 9 5 9-5M3 16l9 5 9-5" /></svg>;
     case "link": return <svg {...common}><path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1.2 1.2" /><path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1.2-1.2" /></svg>;
     case "loader": return <svg {...common}><path d="M12 3a9 9 0 1 0 9 9" /></svg>;
+    case "maximize": return <svg {...common}><path d="M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5" /><path d="m3 8 5-5M16 3l5 5M21 16l-5 5M8 21l-5-5" /></svg>;
     case "pause": return <svg {...common}><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>;
     case "plus": return <svg {...common}><path d="M12 5v14M5 12h14" /></svg>;
     case "refresh": return <svg {...common}><path d="M20 11a8 8 0 0 0-14.7-4L3 9M3 4v5h5M4 13a8 8 0 0 0 14.7 4L21 15M21 20v-5h-5" /></svg>;
