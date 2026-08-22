@@ -84,10 +84,10 @@ Extend the Projects V2 query boundary to retain only normalized reconciliation m
 - available status option IDs/names;
 - issue number, URL, and open/closed state.
 
-Add REST issue state updates and the `updateProjectV2ItemFieldValue` GraphQL mutation. Status
-aliases are deliberately narrow and human-readable: `Todo`/`Inbox`, `Ready`, `In Progress`,
-`Agent Review`/`In Review`, `Human Review`, `Blocked`, and `Done`/`Complete`. If an alias is absent,
-return an actionable unmapped-option error.
+Add REST issue state updates and the `updateProjectV2ItemFieldValue` GraphQL mutation. Status aliases
+are deliberately narrow and human-readable: `Todo`/`Inbox`, `Ready`, `In Progress`,
+`Review` (with legacy `Agent Review`/`In Review`/`Human Review` aliases), `Blocked`, and
+`Done`/`Complete`. If an alias is absent, return an actionable unmapped-option error.
 
 ### Human status PATCH
 

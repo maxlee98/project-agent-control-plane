@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { addActivity, addRunEvent, createRun, finishRunAndTask, getProject, getRun, getTask, stopRunAndReleaseClaim, updateRun, updateTask } from "./repository";
-import { createPullRequest, publishComment } from "./github";
+import { createPullRequest, publishComment, reconcileTaskStatus } from "./github";
 import { runCline, stopClineRun } from "./cline";
 import { IssueCheckpointPublisher } from "./issue-checkpoints";
 import type { RunUsageSnapshot } from "./cost";
@@ -54,6 +54,7 @@ export interface LiveRunDependencies {
   runChecks: typeof runChecks;
   commitAndPush: typeof commitAndPush;
   createPullRequest: typeof createPullRequest;
+  reconcileTaskStatus: typeof reconcileTaskStatus;
   publishComment: typeof publishComment;
 }
 
@@ -64,6 +65,7 @@ const liveRunDependencies: LiveRunDependencies = {
   runChecks,
   commitAndPush,
   createPullRequest,
+  reconcileTaskStatus,
   publishComment,
 };
 
@@ -190,7 +192,10 @@ export async function executeLiveRun(runId: string, taskId: string, sourceRunId?
     assertRunNotStopped(runId);
     const pr = await dependencies.createPullRequest(project.fullName, task, { ...handoffRun, commitSha: handoff.sha, branchName: workspace.branchName });
     assertRunNotStopped(runId);
-    const completedRun = finishRunAndTask(runId, task.id, { status: "completed", progress: 100, currentActivity: "Pull request ready for review", finishedAt: new Date().toISOString() }, { status: "agent_review", agentState: "succeeded", branchName: workspace.branchName, prUrl: pr.url, summary: `Live run completed. ${handoff.changedFiles.length} files changed; PR #${pr.number} is ready for review.` });
+    updateTask(task.id, { branchName: workspace.branchName, prUrl: pr.url, summary: `Live run completed. ${handoff.changedFiles.length} files changed; PR #${pr.number} is ready for human review.` });
+    if (project.githubProjectId) await dependencies.reconcileTaskStatus(project, task, "human_review");
+    assertRunNotStopped(runId);
+    const completedRun = finishRunAndTask(runId, task.id, { status: "completed", progress: 100, currentActivity: "Pull request ready for review", finishedAt: new Date().toISOString() }, { status: "human_review", agentState: "succeeded", branchName: workspace.branchName, prUrl: pr.url, summary: `Live run completed. ${handoff.changedFiles.length} files changed; PR #${pr.number} is ready for human review.` });
     if (!completedRun) return;
     addRunEvent(runId, "handoff_complete", "Pull request created", pr.url);
     addActivity({ projectId: project.id, taskId: task.id, runId, type: "pull_request", title: "Live PR ready for review", detail: `${handoff.changedFiles.length} changed files · ${handoff.sha.slice(0, 8)}`, tone: "violet" });
@@ -229,7 +234,7 @@ function schedule(runId: string, taskId: string, mode: AgentRun["mode"]) {
       const isComplete = step.progress === 100;
       const event: RunEventDraft = { type: step.type as RunEventType, message: step.message, detail: step.detail, checkpoint: false };
       if (isComplete) {
-        const currentRun = finishRunAndTask(runId, taskId, { status: "completed", progress: step.progress, currentActivity: step.activity, finishedAt: new Date().toISOString() }, { status: "agent_review", agentState: "succeeded", summary: step.detail, branchName, prUrl: `https://github.com/${currentTask.githubUrl?.split("github.com/")[1]?.split("/issues/")[0] ?? "owner/repository"}/pull/${currentTask.issueNumber ?? 1}` });
+        const currentRun = finishRunAndTask(runId, taskId, { status: "completed", progress: step.progress, currentActivity: step.activity, finishedAt: new Date().toISOString() }, { status: "human_review", agentState: "succeeded", summary: step.detail, branchName, prUrl: `https://github.com/${currentTask.githubUrl?.split("github.com/")[1]?.split("/issues/")[0] ?? "owner/repository"}/pull/${currentTask.issueNumber ?? 1}` });
         if (!currentRun) return;
       } else {
         const currentRun = updateRun(runId, { status: "running", progress: step.progress, currentActivity: step.activity, finishedAt: null }, { onlyIfActive: true });

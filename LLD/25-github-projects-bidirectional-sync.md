@@ -99,10 +99,10 @@ truth.
 
 ### Status mapping
 
-The configured Project exposes `Todo`, `In Progress`, and `Done`. Local `inbox`/`ready` map to Todo;
-`in_progress`, `agent_review`, `human_review`, and `blocked` map to In Progress; `done` maps to Done.
-Inbound Project statuses map to `ready`, `in_progress`, and `done`. Unsupported custom options fail
-with an explicit diagnostic.
+The configured Project exposes `Todo`, `In Progress`, `Review`, and `Done`. Local `inbox`/`ready` map to
+Todo; `in_progress` and `blocked` map to In Progress; `human_review` maps to Review; `done` maps to Done.
+Inbound Project statuses map to `ready`, `in_progress`, `human_review`, and `done`; legacy review names
+remain accepted as aliases. Unsupported custom options fail with an explicit diagnostic.
 
 ## Data and state transitions
 

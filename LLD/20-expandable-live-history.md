@@ -81,7 +81,7 @@ open state and resets it when the selected task changes.
   per-detail-rail open state.
 - `src/components/icons.tsx`: add an expand/maximize icon if the existing vocabulary does not
   provide an appropriate affordance.
-- `LLD/live-history-expansion.md`: record design decisions and actual validation results.
+- `LLD/20-expandable-live-history.md`: record design decisions and actual validation results.
 
 ## Risks, edge cases, and rollback
 

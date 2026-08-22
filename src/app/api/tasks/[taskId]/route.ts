@@ -1,8 +1,8 @@
 import { publishComment, reconcileTaskStatus } from "@/lib/server/github";
 import { addTaskComment, claimIdempotencyKey, completeIdempotencyKey, completeTaskByHuman, getProject, getTask, updateTask, updateTaskIssue } from "@/lib/server/repository";
 import { parseEstimatedCostCents } from "@/lib/server/cost";
-import { BOARD_COLUMNS, type Project, type Task, type TaskStatus } from "@/lib/domain";
 import { API_LIMITS, apiError, apiErrorFrom, apiResponse, assertAllowedKeys, getIdempotencyKey, idempotencyResponse, optionalEnum, optionalInteger, optionalNonEmptyString, optionalString, parseJsonBody, requestFingerprint, validateIdentifier } from "@/lib/server/api";
+import { BOARD_COLUMNS, normalizeTaskStatus, type Project, type Task, type TaskStatus } from "@/lib/domain";
 
 type SyncableTask = Pick<Task, "id" | "issueNumber" | "title" | "description" | "githubUrl">;
 
@@ -21,27 +21,21 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ta
     const task = getTask(taskId);
     const project = task ? getProject(task.projectId) : null;
     if (!task || !project) return apiError("TASK_NOT_FOUND", "Task not found.", 404);
-    const status = optionalEnum(body, "status", BOARD_COLUMNS.map((column) => column.id));
+    const rawStatus = optionalEnum(body, "status", [...BOARD_COLUMNS.map((column) => column.id), "agent_review", "in_review", "review"] as const);
+    const status = rawStatus === undefined ? undefined : normalizeTaskStatus(rawStatus);
     const priority = optionalInteger(body, "priority", 1, 4);
     const title = optionalNonEmptyString(body, "title", API_LIMITS.taskTitle);
     const description = optionalString(body, "description", API_LIMITS.taskDescription);
     const comment = optionalNonEmptyString(body, "comment", API_LIMITS.comment);
     const estimatedCostCents = body.estimatedCostUsd === undefined ? undefined : parseEstimatedCostCents(body.estimatedCostUsd);
-    if (estimatedCostCents === null || (estimatedCostCents !== undefined && estimatedCostCents > API_LIMITS.estimatedCostCents)) {
-      return apiError("INVALID_COST", "Estimated cost must be a non-negative USD amount within the supported limit.", 400, { field: "estimatedCostUsd" });
-    }
+    if (estimatedCostCents === null || (estimatedCostCents !== undefined && estimatedCostCents > API_LIMITS.estimatedCostCents)) return apiError("INVALID_COST", "Estimated cost must be a non-negative USD amount within the supported limit.", 400, { field: "estimatedCostUsd" });
     const remoteMutation = Boolean(comment || status);
-    if (comment && (status || priority !== undefined || title !== undefined || description !== undefined || estimatedCostCents !== undefined)) {
-      return apiError("VALIDATION_ERROR", "A comment cannot be combined with another task mutation.", 400);
-    }
-    if (!comment && status === undefined && priority === undefined && title === undefined && description === undefined && estimatedCostCents === undefined) {
-      return apiError("VALIDATION_ERROR", "At least one task field is required.", 400);
-    }
+    if (comment && (status || priority !== undefined || title !== undefined || description !== undefined || estimatedCostCents !== undefined)) return apiError("VALIDATION_ERROR", "A comment cannot be combined with another task mutation.", 400);
+    if (!comment && status === undefined && priority === undefined && title === undefined && description === undefined && estimatedCostCents === undefined) return apiError("VALIDATION_ERROR", "At least one task field is required.", 400);
     if (!remoteMutation) {
       const updated = updateTask(taskId, { status, priority, title, description, estimatedCostCents });
       return updated ? apiResponse(updated) : apiError("TASK_NOT_FOUND", "Task not found.", 404);
     }
-
     const key = getIdempotencyKey(request);
     const operation = comment ? "task.comment" : "task.status";
     const fingerprint = requestFingerprint({ taskId, status: status ?? null, comment: comment ?? null });

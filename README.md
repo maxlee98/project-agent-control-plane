@@ -82,7 +82,7 @@ In Live mode, **Run** performs this handoff:
 3. Detect and run project checks.
 4. Commit and push only after successful execution/checks.
 5. Create a real GitHub pull request and post a concise issue comment.
-6. Move the task to `Agent review` only after the PR exists.
+6. Move the task to `Review` only after the PR exists, ready for a human decision.
 
 If a prerequisite, check, Git operation, or GitHub request fails, the task is blocked/failed with
 the real error and no fake PR URL is generated. Failed worktrees are preserved for inspection.
@@ -136,7 +136,7 @@ Merging remains a human decision; agents must not merge automatically.
 ### Working now
 
 - Multi-project overview and project switcher
-- Kanban board with seven workflow stages
+- Kanban board with six workflow stages
 - Task creation, task status changes, and human context notes
 - Task detail rail with activity timeline
 - Agent run controls and local run lifecycle simulation

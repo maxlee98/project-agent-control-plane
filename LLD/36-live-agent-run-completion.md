@@ -64,7 +64,8 @@ to be a warning after the PR is complete, but it lacks an end-to-end regression 
 - A mocked live run reaches completed/review-ready state with persisted run events, task state, PR
   identity, and provider/model cost usage intact.
 - An optional Issue-comment failure after PR creation leaves the run completed and task in
-  `agent_review`, records a warning event/activity, and does not trigger a false retry/failure.
+  `human_review` (displayed as `Review`), records a warning event/activity, and does not trigger a
+  false retry/failure.
 - Tests, typecheck, build, and a documented live-run verification procedure pass.
 
 ## Existing architecture and affected boundaries
@@ -124,8 +125,8 @@ No schema migration is required. The intended run state is:
 ```text
 queued -> configuration -> workspace -> cline session/turn -> validation -> git -> PR
                                                                \-> failure: failed + blocked + preserved workspace
-PR -> completed + agent_review -> optional Issue comment
-                              \-> comment failure: completed + agent_review + warning
+PR -> completed + human_review -> optional Issue comment
+                                \-> comment failure: completed + human_review + warning
 ```
 
 The Cline session registry is process-local and exists only while the session is active. SQLite
