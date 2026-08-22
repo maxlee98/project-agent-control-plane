@@ -14,6 +14,86 @@ type RunRow = Record<string, unknown>;
 type ActivityRow = Record<string, unknown>;
 
 const isoNow = () => new Date().toISOString();
+const TERMINAL_RUN_STATUSES = new Set<AgentRun["status"]>(["completed", "failed", "stopped"]);
+const DEFAULT_GLOBAL_RUN_LIMIT = 4;
+const DEFAULT_PROJECT_RUN_LIMIT = 2;
+
+export type RunClaimErrorCode = "RUN_ALREADY_ACTIVE" | "GLOBAL_CAPACITY_REACHED" | "PROJECT_CAPACITY_REACHED";
+
+export class RunClaimError extends Error {
+  readonly code: RunClaimErrorCode;
+  readonly statusCode: 409 | 429;
+
+  constructor(code: RunClaimErrorCode, message: string) {
+    super(message);
+    this.name = "RunClaimError";
+    this.code = code;
+    this.statusCode = code === "RUN_ALREADY_ACTIVE" ? 409 : 429;
+  }
+}
+
+export function isRunClaimError(error: unknown): error is RunClaimError {
+  return error instanceof RunClaimError || (
+    error !== null
+    && typeof error === "object"
+    && (error as { name?: unknown }).name === "RunClaimError"
+    && typeof (error as { code?: unknown }).code === "string"
+  );
+}
+
+function positiveIntegerFromEnv(name: string, fallback: number) {
+  const value = Number(process.env[name]);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+export function getRunCapacity() {
+  return {
+    globalLimit: positiveIntegerFromEnv("AGENT_MAX_CONCURRENT_RUNS", DEFAULT_GLOBAL_RUN_LIMIT),
+    perProjectLimit: positiveIntegerFromEnv("AGENT_MAX_CONCURRENT_RUNS_PER_PROJECT", DEFAULT_PROJECT_RUN_LIMIT),
+  };
+}
+
+function runStatusIsTerminal(status: unknown): status is AgentRun["status"] {
+  return typeof status === "string" && TERMINAL_RUN_STATUSES.has(status as AgentRun["status"]);
+}
+
+function countActiveRunClaims(projectId?: string) {
+  const row = projectId
+    ? db.prepare("SELECT COUNT(*) AS count FROM active_run_claims WHERE execution_mode = 'live' AND project_id = ?").get(projectId) as { count: number }
+    : db.prepare("SELECT COUNT(*) AS count FROM active_run_claims WHERE execution_mode = 'live'").get() as { count: number };
+  return Number(row.count);
+}
+
+function getClaimLeaseMs() {
+  const explicitMinutes = Number(process.env.AGENT_CLAIM_LEASE_MINUTES);
+  if (Number.isFinite(explicitMinutes) && explicitMinutes > 0) return explicitMinutes * 60_000;
+  const maxRunMinutes = Number(process.env.AGENT_MAX_RUN_MINUTES);
+  const safeMaxRunMinutes = Number.isFinite(maxRunMinutes) && maxRunMinutes > 0 ? maxRunMinutes : 45;
+  return (safeMaxRunMinutes + 1) * 60_000;
+}
+
+/** Recover durable claims left behind by a crashed or timed-out dispatch. */
+export function recoverExpiredRunClaims() {
+  const now = isoNow();
+  const recover = db.transaction(() => {
+    const claims = db.prepare("SELECT task_id, run_id, lease_expires_at FROM active_run_claims WHERE lease_expires_at <= ?").all(now) as Array<{ task_id: string; run_id: string; lease_expires_at: string }>;
+    for (const claim of claims) {
+      const run = db.prepare("SELECT status FROM runs WHERE id = ?").get(claim.run_id) as { status?: AgentRun["status"] } | undefined;
+      if (run && !runStatusIsTerminal(run.status)) {
+        const message = "Run lease expired before the agent completed. Start a new run after reviewing the preserved workspace.";
+        db.prepare("UPDATE runs SET status = 'failed', current_activity = 'Run lease expired', error = ?, finished_at = ?, cost_source = CASE WHEN cost_source = 'pending' THEN 'unavailable' ELSE cost_source END WHERE id = ?")
+          .run(message, now, claim.run_id);
+        db.prepare("UPDATE tasks SET status = 'blocked', agent_state = 'failed', current_summary = ?, updated_at = ? WHERE id = ? AND agent_state = 'running'")
+          .run(message, now, claim.task_id);
+        addRunEvent(claim.run_id, "run_failed", "Run lease expired", "The active claim was recovered without deleting run history.");
+        addActivity({ projectId: String((db.prepare("SELECT project_id FROM runs WHERE id = ?").get(claim.run_id) as { project_id?: string } | undefined)?.project_id ?? ""), taskId: claim.task_id, runId: claim.run_id, type: "run_failed", title: "Run lease expired", detail: "The active claim was recovered; the preserved workspace is available for inspection.", tone: "red" });
+      }
+      db.prepare("DELETE FROM active_run_claims WHERE task_id = ?").run(claim.task_id);
+    }
+    return claims.length;
+  });
+  return recover();
+}
 const json = (value: unknown) => JSON.stringify(value ?? []);
 const fromJson = (value: unknown): string[] => {
   try {
@@ -130,6 +210,7 @@ export function mapActivity(row: ActivityRow): ActivityItem {
 }
 
 export function getDashboard(): DashboardData {
+  recoverExpiredRunClaims();
   const executionMode = process.env.EXECUTION_MODE === "live" ? "live" : "demo";
   const projectRows = db.prepare(`
     SELECT p.*, COUNT(DISTINCT CASE WHEN t.status NOT IN ('done') THEN t.id END) AS open_tasks,
@@ -153,6 +234,8 @@ export function getDashboard(): DashboardData {
   const visibleRunIds = new Set(runs.map((run) => run.id));
   const runEvents = getRunEvents().filter((event) => visibleRunIds.has(event.runId));
   const liveReady = Boolean(process.env.CLINE_API_KEY && process.env.GITHUB_TOKEN);
+  const capacity = getRunCapacity();
+  const activeClaimCount = countActiveRunClaims();
   return {
     projects,
     tasks,
@@ -168,6 +251,7 @@ export function getDashboard(): DashboardData {
           ? null
           : "Live mode needs CLINE_API_KEY and GITHUB_TOKEN before it can modify repositories.",
       reasoning: getReasoningCapabilitySync(process.env.CLINE_PROVIDER_ID ?? "anthropic", process.env.CLINE_MODEL_ID ?? "claude-sonnet-4-5"),
+      capacity: { active: activeClaimCount, ...capacity },
     },
   };
 }
@@ -266,6 +350,7 @@ export function completeTaskByHuman(taskId: string, summary?: string) {
   const complete = db.transaction(() => {
     db.prepare("UPDATE tasks SET status = 'done', agent_state = 'idle', current_summary = ?, updated_at = ? WHERE id = ?")
       .run(completionSummary, now, taskId);
+    db.prepare("DELETE FROM active_run_claims WHERE task_id = ?").run(taskId);
     const existingActivity = db.prepare("SELECT id FROM activity WHERE task_id = ? AND type = 'human_completion' LIMIT 1").get(taskId);
     if (!existingActivity) {
       db.prepare("INSERT INTO activity (id, project_id, task_id, run_id, type, title, detail, tone, created_at) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)")
@@ -298,8 +383,7 @@ export function touchProject(projectId: string) {
 }
 
 export function createRun(input: { taskId: string; mode: AgentRun["mode"]; reasoningEffort?: ReasoningEffort | null }) {
-  const task = getTask(input.taskId);
-  if (!task) return null;
+  recoverExpiredRunClaims();
   const now = isoNow();
   const id = `run-${randomUUID()}`;
   const executionMode = process.env.EXECUTION_MODE === "live" ? "live" : "demo";
@@ -307,23 +391,94 @@ export function createRun(input: { taskId: string; mode: AgentRun["mode"]; reaso
   const modelId = process.env.CLINE_MODEL_ID ?? "claude-sonnet-4-5";
   const reasoningEffort = validateReasoningEffortSync(providerId, modelId, input.reasoningEffort);
   const costSource = executionMode === "live" ? "pending" : "unavailable";
-  db.prepare(`INSERT INTO runs (id, task_id, project_id, mode, status, progress, current_activity, started_at, execution_mode, provider_id, model_id, reasoning_effort, cost_source) VALUES (?, ?, ?, ?, 'queued', 0, 'Queued for dispatch', ?, ?, ?, ?, ?, ?)`)
-    .run(id, task.id, task.projectId, input.mode, now, executionMode, providerId, modelId, reasoningEffort, costSource);
-  updateTask(task.id, { status: "in_progress", agentState: "running", summary: "Agent is preparing an isolated workspace." });
-  addActivity({ projectId: task.projectId, taskId: task.id, runId: id, type: "run_started", title: `${input.mode === "start" ? "Agent started" : "Agent continued"}`, detail: task.title, tone: "amber" });
-  addRunEvent(id, "run_started", "Run claimed by the local orchestrator", "Workspace and workflow preparation are next.");
-  return mapRun(db.prepare("SELECT * FROM runs WHERE id = ?").get(id) as RunRow);
+  const limits = getRunCapacity();
+  const claim = db.transaction(() => {
+    const taskRow = db.prepare("SELECT * FROM tasks WHERE id = ?").get(input.taskId) as TaskRow | undefined;
+    if (!taskRow) return null;
+    const task = mapTask(taskRow);
+    const existingClaim = db.prepare("SELECT run_id FROM active_run_claims WHERE task_id = ?").get(task.id) as { run_id?: string } | undefined;
+    if (existingClaim?.run_id) throw new RunClaimError("RUN_ALREADY_ACTIVE", "This task already has an active run.");
+    if (executionMode === "live") {
+      const globalActive = countActiveRunClaims();
+      if (globalActive >= limits.globalLimit) throw new RunClaimError("GLOBAL_CAPACITY_REACHED", "Live-run capacity is full. Wait for an active run to finish before starting another.");
+      const projectActive = countActiveRunClaims(task.projectId);
+      if (projectActive >= limits.perProjectLimit) throw new RunClaimError("PROJECT_CAPACITY_REACHED", "This project has reached its Live-run capacity. Wait for one of its active runs to finish.");
+    }
+    db.prepare(`INSERT INTO runs (id, task_id, project_id, mode, status, progress, current_activity, started_at, execution_mode, provider_id, model_id, reasoning_effort, cost_source) VALUES (?, ?, ?, ?, 'queued', 0, 'Queued for dispatch', ?, ?, ?, ?, ?, ?)`)
+      .run(id, task.id, task.projectId, input.mode, now, executionMode, providerId, modelId, reasoningEffort, costSource);
+    const leaseExpiresAt = new Date(Date.parse(now) + getClaimLeaseMs()).toISOString();
+    db.prepare("INSERT INTO active_run_claims (task_id, run_id, project_id, execution_mode, claimed_at, lease_expires_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(task.id, id, task.projectId, executionMode, now, leaseExpiresAt);
+    db.prepare("UPDATE tasks SET status = 'in_progress', agent_state = 'running', current_summary = ?, updated_at = ? WHERE id = ?")
+      .run("Agent is preparing an isolated workspace.", now, task.id);
+    addActivity({ projectId: task.projectId, taskId: task.id, runId: id, type: "run_started", title: `${input.mode === "start" ? "Agent started" : "Agent continued"}`, detail: task.title, tone: "amber" });
+    addRunEvent(id, "run_started", "Run claimed by the local orchestrator", "Workspace and workflow preparation are next.");
+    return mapRun(db.prepare("SELECT * FROM runs WHERE id = ?").get(id) as RunRow);
+  });
+  try {
+    return claim();
+  } catch (error) {
+    if (error instanceof RunClaimError) throw error;
+    if (error instanceof Error && error.message.includes("UNIQUE constraint failed: active_run_claims.task_id")) {
+      throw new RunClaimError("RUN_ALREADY_ACTIVE", "This task already has an active run.");
+    }
+    throw error;
+  }
 }
 
-export function updateRun(runId: string, input: Partial<Pick<AgentRun, "status" | "sessionId" | "branchName" | "workspacePath" | "progress" | "currentActivity" | "finishedAt" | "error" | "commitSha" | "changedFiles" | "checks" | "providerId" | "modelId" | "inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheWriteTokens" | "actualCostUsd" | "costSource">>) {
-  const run = db.prepare("SELECT * FROM runs WHERE id = ?").get(runId) as RunRow | undefined;
-  if (!run) return null;
-  const current = mapRun(run);
-  const next = { ...current, ...input };
-  const actualCostMicros = next.actualCostUsd === null ? null : next.actualCostUsd === undefined ? null : Math.round(next.actualCostUsd * 1_000_000);
-  db.prepare(`UPDATE runs SET status = ?, session_id = ?, branch_name = ?, workspace_path = ?, progress = ?, current_activity = ?, finished_at = ?, error = ?, commit_sha = ?, changed_files_json = ?, checks_json = ?, provider_id = ?, model_id = ?, input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, cache_write_tokens = ?, actual_cost_micros = ?, cost_source = ? WHERE id = ?`)
-    .run(next.status, next.sessionId, next.branchName, next.workspacePath, next.progress, next.currentActivity, next.finishedAt, next.error, next.commitSha, json(next.changedFiles), json(next.checks), next.providerId, next.modelId, next.inputTokens, next.outputTokens, next.cacheReadTokens, next.cacheWriteTokens, actualCostMicros, next.costSource, runId);
-  return mapRun(db.prepare("SELECT * FROM runs WHERE id = ?").get(runId) as RunRow);
+export function updateRun(runId: string, input: Partial<Pick<AgentRun, "status" | "sessionId" | "branchName" | "workspacePath" | "progress" | "currentActivity" | "finishedAt" | "error" | "commitSha" | "changedFiles" | "checks" | "providerId" | "modelId" | "inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheWriteTokens" | "actualCostUsd" | "costSource">>, options?: { onlyIfActive?: boolean }) {
+  const update = db.transaction(() => {
+    const run = db.prepare("SELECT * FROM runs WHERE id = ?").get(runId) as RunRow | undefined;
+    if (!run) return null;
+    const current = mapRun(run);
+    if (options?.onlyIfActive && runStatusIsTerminal(current.status)) return null;
+    const next = { ...current, ...input };
+    const actualCostMicros = next.actualCostUsd === null ? null : next.actualCostUsd === undefined ? null : Math.round(next.actualCostUsd * 1_000_000);
+    db.prepare(`UPDATE runs SET status = ?, session_id = ?, branch_name = ?, workspace_path = ?, progress = ?, current_activity = ?, finished_at = ?, error = ?, commit_sha = ?, changed_files_json = ?, checks_json = ?, provider_id = ?, model_id = ?, input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, cache_write_tokens = ?, actual_cost_micros = ?, cost_source = ? WHERE id = ?`)
+      .run(next.status, next.sessionId, next.branchName, next.workspacePath, next.progress, next.currentActivity, next.finishedAt, next.error, next.commitSha, json(next.changedFiles), json(next.checks), next.providerId, next.modelId, next.inputTokens, next.outputTokens, next.cacheReadTokens, next.cacheWriteTokens, actualCostMicros, next.costSource, runId);
+    if (runStatusIsTerminal(next.status)) db.prepare("DELETE FROM active_run_claims WHERE run_id = ?").run(runId);
+    return mapRun(db.prepare("SELECT * FROM runs WHERE id = ?").get(runId) as RunRow);
+  });
+  return update();
+}
+
+export function finishRunAndTask(runId: string, taskId: string, runInput: Partial<Pick<AgentRun, "status" | "sessionId" | "branchName" | "workspacePath" | "progress" | "currentActivity" | "finishedAt" | "error" | "commitSha" | "changedFiles" | "checks" | "providerId" | "modelId" | "inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheWriteTokens" | "actualCostUsd" | "costSource">>, taskInput: { status: Task["status"]; agentState: Task["agentState"]; summary: string; branchName?: string | null; prUrl?: string | null }) {
+  const finish = db.transaction(() => {
+    const runRow = db.prepare("SELECT * FROM runs WHERE id = ? AND task_id = ?").get(runId, taskId) as RunRow | undefined;
+    if (!runRow) return null;
+    const currentRun = mapRun(runRow);
+    if (runStatusIsTerminal(currentRun.status)) return null;
+    const taskRow = db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId) as TaskRow | undefined;
+    if (!taskRow) return null;
+    const currentTask = mapTask(taskRow);
+    const nextRun = { ...currentRun, ...runInput };
+    const nextTask = { ...currentTask, ...taskInput };
+    const actualCostMicros = nextRun.actualCostUsd === null ? null : nextRun.actualCostUsd === undefined ? null : Math.round(nextRun.actualCostUsd * 1_000_000);
+    db.prepare(`UPDATE runs SET status = ?, session_id = ?, branch_name = ?, workspace_path = ?, progress = ?, current_activity = ?, finished_at = ?, error = ?, commit_sha = ?, changed_files_json = ?, checks_json = ?, provider_id = ?, model_id = ?, input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, cache_write_tokens = ?, actual_cost_micros = ?, cost_source = ? WHERE id = ?`)
+      .run(nextRun.status, nextRun.sessionId, nextRun.branchName, nextRun.workspacePath, nextRun.progress, nextRun.currentActivity, nextRun.finishedAt, nextRun.error, nextRun.commitSha, json(nextRun.changedFiles), json(nextRun.checks), nextRun.providerId, nextRun.modelId, nextRun.inputTokens, nextRun.outputTokens, nextRun.cacheReadTokens, nextRun.cacheWriteTokens, actualCostMicros, nextRun.costSource, runId);
+    db.prepare("UPDATE tasks SET status = ?, agent_state = ?, current_summary = ?, branch_name = ?, pr_url = ?, updated_at = ? WHERE id = ?")
+      .run(nextTask.status, nextTask.agentState, nextTask.currentSummary, nextTask.branchName, nextTask.prUrl, isoNow(), taskId);
+    db.prepare("DELETE FROM active_run_claims WHERE run_id = ?").run(runId);
+    return mapRun(db.prepare("SELECT * FROM runs WHERE id = ?").get(runId) as RunRow);
+  });
+  return finish();
+}
+
+export function stopRunAndReleaseClaim(runId: string) {
+  const stop = db.transaction(() => {
+    const row = db.prepare("SELECT * FROM runs WHERE id = ?").get(runId) as RunRow | undefined;
+    if (!row) return null;
+    const run = mapRun(row);
+    if (runStatusIsTerminal(run.status)) return null;
+    const now = isoNow();
+    db.prepare("UPDATE runs SET status = 'stopped', current_activity = ?, finished_at = ? WHERE id = ?")
+      .run("Stopped by operator", now, runId);
+    db.prepare("UPDATE tasks SET agent_state = 'waiting', current_summary = ?, updated_at = ? WHERE id = ?")
+      .run("Run stopped by you. Continue when you are ready.", now, run.taskId);
+    db.prepare("DELETE FROM active_run_claims WHERE run_id = ?").run(runId);
+    return mapRun(db.prepare("SELECT * FROM runs WHERE id = ?").get(runId) as RunRow);
+  });
+  return stop();
 }
 
 export function addRunEvent(runId: string, type: RunEventType, message: string, detail?: string | null) {

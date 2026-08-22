@@ -9,6 +9,8 @@ The MVP is a personal, local, high-trust tool. That does not mean it should be c
 - Validate that every worktree path is inside the configured workspace root.
 - Use sanitized, collision-resistant branch and workspace names.
 - Enforce one active claim per task and a global/per-project concurrency cap.
+- Configure the Live-run caps with `AGENT_MAX_CONCURRENT_RUNS` and
+  `AGENT_MAX_CONCURRENT_RUNS_PER_PROJECT`; claims expire through the durable lease recovery path.
 - Keep a stop-all control available to the operator.
 - Preserve failed worktrees for inspection instead of deleting evidence.
 - Apply idle and maximum-runtime timeouts to real agent sessions.

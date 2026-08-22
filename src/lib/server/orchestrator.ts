@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { addActivity, addRunEvent, createRun, getProject, getRun, getTask, updateRun, updateTask } from "./repository";
+import { addActivity, addRunEvent, createRun, finishRunAndTask, getProject, getRun, getTask, stopRunAndReleaseClaim, updateRun, updateTask } from "./repository";
 import { createPullRequest, publishComment } from "./github";
 import { runCline, stopClineRun } from "./cline";
 import { IssueCheckpointPublisher } from "./issue-checkpoints";
@@ -81,7 +81,9 @@ function safeChecks(checks: ReturnType<typeof runChecks> extends Promise<infer R
 }
 
 function assertRunNotStopped(runId: string) {
-  if (getRun(runId)?.status === "stopped") throw new Error("Run stopped by operator.");
+  const status = getRun(runId)?.status;
+  if (status === "stopped") throw new Error("Run stopped by operator.");
+  if (status === "failed" || status === "completed") throw new Error("Run is no longer active.");
 }
 
 async function buildPrompt(projectPath: string, task: ReturnType<typeof getTask>) {
@@ -188,8 +190,8 @@ export async function executeLiveRun(runId: string, taskId: string, sourceRunId?
     assertRunNotStopped(runId);
     const pr = await dependencies.createPullRequest(project.fullName, task, { ...handoffRun, commitSha: handoff.sha, branchName: workspace.branchName });
     assertRunNotStopped(runId);
-    updateTask(task.id, { status: "agent_review", agentState: "succeeded", branchName: workspace.branchName, prUrl: pr.url, summary: `Live run completed. ${handoff.changedFiles.length} files changed; PR #${pr.number} is ready for review.` });
-    updateRun(runId, { status: "completed", progress: 100, currentActivity: "Pull request ready for review", finishedAt: new Date().toISOString() });
+    const completedRun = finishRunAndTask(runId, task.id, { status: "completed", progress: 100, currentActivity: "Pull request ready for review", finishedAt: new Date().toISOString() }, { status: "agent_review", agentState: "succeeded", branchName: workspace.branchName, prUrl: pr.url, summary: `Live run completed. ${handoff.changedFiles.length} files changed; PR #${pr.number} is ready for review.` });
+    if (!completedRun) return;
     addRunEvent(runId, "handoff_complete", "Pull request created", pr.url);
     addActivity({ projectId: project.id, taskId: task.id, runId, type: "pull_request", title: "Live PR ready for review", detail: `${handoff.changedFiles.length} changed files · ${handoff.sha.slice(0, 8)}`, tone: "violet" });
     if (task.issueNumber) {
@@ -197,12 +199,12 @@ export async function executeLiveRun(runId: string, taskId: string, sourceRunId?
       await checkpoints?.checkpoint({ phase: "handoff", progress: 100, detail: `PR: ${pr.url} · Commit: ${handoff.sha.slice(0, 8)} · Checks: ${safeChecked.filter((check) => check.status === "passed").length}/${safeChecked.length} passed.` }, { force: true });
     }
   } catch (error) {
-    if (getRun(runId)?.status === "stopped") return;
+    if (["stopped", "failed", "completed"].includes(getRun(runId)?.status ?? "")) return;
     const message = stageFailureMessage(stage, error);
-    const failedRun = getRun(runId);
-    if (failedRun?.costSource === "pending") updateRun(runId, { costSource: "unavailable" });
-    updateRun(runId, { status: "failed", currentActivity: "Live run failed", error: message, finishedAt: new Date().toISOString() });
-    updateTask(task.id, { status: "blocked", agentState: "failed", summary: message });
+    const currentFailedRun = getRun(runId);
+    if (currentFailedRun?.costSource === "pending") updateRun(runId, { costSource: "unavailable" });
+    const finalizedFailedRun = finishRunAndTask(runId, task.id, { status: "failed", currentActivity: "Live run failed", error: message, finishedAt: new Date().toISOString() }, { status: "blocked", agentState: "failed", summary: message });
+    if (!finalizedFailedRun) return;
     addRunEvent(runId, "stage_failed", `Live run stage failed: ${stage}`, safeErrorMessage(error));
     addRunEvent(runId, "run_failed", "Live run failed", message);
     addActivity({ projectId: project.id, taskId: task.id, runId, type: "run_failed", title: "Live run failed", detail: message, tone: "red" });
@@ -224,17 +226,17 @@ function schedule(runId: string, taskId: string, mode: AgentRun["mode"]) {
     const timer = setTimeout(() => {
       const currentTask = getTask(taskId);
       if (!currentTask) return;
-      const currentRun = updateRun(runId, { status: step.progress === 100 ? "completed" : "running", progress: step.progress, currentActivity: step.activity, finishedAt: step.progress === 100 ? new Date().toISOString() : null });
-      if (!currentRun) return;
+      const isComplete = step.progress === 100;
       const event: RunEventDraft = { type: step.type as RunEventType, message: step.message, detail: step.detail, checkpoint: false };
+      if (isComplete) {
+        const currentRun = finishRunAndTask(runId, taskId, { status: "completed", progress: step.progress, currentActivity: step.activity, finishedAt: new Date().toISOString() }, { status: "agent_review", agentState: "succeeded", summary: step.detail, branchName, prUrl: `https://github.com/${currentTask.githubUrl?.split("github.com/")[1]?.split("/issues/")[0] ?? "owner/repository"}/pull/${currentTask.issueNumber ?? 1}` });
+        if (!currentRun) return;
+      } else {
+        const currentRun = updateRun(runId, { status: "running", progress: step.progress, currentActivity: step.activity, finishedAt: null }, { onlyIfActive: true });
+        if (!currentRun) return;
+        updateTask(taskId, { status: "in_progress", agentState: "running", summary: step.detail, branchName, prUrl: currentTask.prUrl });
+      }
       persistRunEvent(runId, event);
-      updateTask(taskId, {
-        status: step.progress === 100 ? "agent_review" : "in_progress",
-        agentState: step.progress === 100 ? "succeeded" : "running",
-        summary: step.detail,
-        branchName,
-        prUrl: step.progress === 100 ? `https://github.com/${currentTask.githubUrl?.split("github.com/")[1]?.split("/issues/")[0] ?? "owner/repository"}/pull/${currentTask.issueNumber ?? 1}` : currentTask.prUrl,
-      });
       if (index === 0 || step.progress === 72 || step.progress === 100) {
         addActivity({ projectId: currentTask.projectId, taskId, runId, type: step.progress === 100 ? "pull_request" : "checkpoint", title: step.message, detail: step.detail, tone: step.progress === 100 ? "violet" : "amber" });
       }
@@ -248,7 +250,6 @@ function schedule(runId: string, taskId: string, mode: AgentRun["mode"]) {
 export function startAgentRun(taskId: string, mode: AgentRun["mode"] = "start", sourceRunId?: string, reasoningEffort?: AgentRun["reasoningEffort"]) {
   const task = getTask(taskId);
   if (!task) return null;
-  if (task.agentState === "running") return { error: "This task already has an active run." } as const;
   if (process.env.EXECUTION_MODE === "live") {
     const prerequisiteError = livePrerequisiteError();
     if (prerequisiteError) return { error: prerequisiteError } as const;
@@ -266,9 +267,8 @@ export function stopAgentRun(runId: string) {
   timers?.forEach(clearTimeout);
   activeRuns.delete(runId);
   void stopClineRun(runId).catch(() => undefined);
-  const run = updateRun(runId, { status: "stopped", currentActivity: "Stopped by operator", finishedAt: new Date().toISOString() });
+  const run = stopRunAndReleaseClaim(runId);
   if (run) {
-    updateTask(run.taskId, { agentState: "waiting", summary: "Run stopped by you. Continue when you are ready." });
     addRunEvent(runId, "run_stopped", "Run stopped by operator", "The worktree was preserved for inspection or continuation.");
     addActivity({ projectId: run.projectId, taskId: run.taskId, runId, type: "run_stopped", title: "Agent stopped", detail: "Workspace preserved for continuation.", tone: "rose" });
   }

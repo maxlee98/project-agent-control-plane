@@ -1,4 +1,5 @@
 import { startAgentRun } from "@/lib/server/orchestrator";
+import { isRunClaimError } from "@/lib/server/repository";
 import { isReasoningEffort, type ReasoningEffort } from "@/lib/domain";
 
 export async function POST(request: Request, { params }: { params: Promise<{ taskId: string }> }) {
@@ -11,6 +12,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tas
   try {
     run = startAgentRun(taskId, body.mode ?? "start", undefined, body.reasoningEffort as ReasoningEffort | null | undefined);
   } catch (error) {
+    if (isRunClaimError(error)) return Response.json({ error: error.message, code: error.code }, { status: error.statusCode });
     return Response.json({ error: error instanceof Error ? error.message : "Reasoning effort is not supported by the configured model." }, { status: 400 });
   }
   if (!run) return Response.json({ error: "Task not found." }, { status: 404 });

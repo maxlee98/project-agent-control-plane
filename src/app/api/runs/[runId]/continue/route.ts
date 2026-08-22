@@ -1,5 +1,6 @@
 import { startAgentRun } from "@/lib/server/orchestrator";
 import { db } from "@/lib/server/db";
+import { isRunClaimError } from "@/lib/server/repository";
 import { isReasoningEffort, type ReasoningEffort } from "@/lib/domain";
 
 export async function POST(request: Request, { params }: { params: Promise<{ runId: string }> }) {
@@ -14,6 +15,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ run
   try {
     run = startAgentRun(row.task_id, "continue", runId, body.reasoningEffort as ReasoningEffort | null | undefined);
   } catch (error) {
+    if (isRunClaimError(error)) return Response.json({ error: error.message, code: error.code }, { status: error.statusCode });
     return Response.json({ error: error instanceof Error ? error.message : "Reasoning effort is not supported by the configured model." }, { status: 400 });
   }
   if (!run) return Response.json({ error: "Could not continue this run." }, { status: 409 });
