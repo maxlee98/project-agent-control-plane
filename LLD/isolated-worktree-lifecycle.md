@@ -173,4 +173,13 @@ left for operator inspection and must not be removed by rollback automation.
 - [x] Implementation self-review completed
 - [x] Tests, typecheck, and build passed
 - [x] Documentation updated
-- [ ] Handoff verified
+- [x] Handoff verified
+
+## Handoff
+
+- Commit: `815b08653e0c7ff8ebeb6dd9377463a2a408a2a2` (`worktree-lifecycle`)
+- Branch: `agent/26-Add-isolated-worktree-lifecycle-4e6ab968`, verified on origin at the same commit.
+- Freshness: verified against `main`; status `ahead`, `ahead=1`, `behind=0`.
+- Pull request: [#43](https://github.com/maxlee98/project-agent-control-plane/pull/43), verified open,
+  base `main`, head `agent/26-Add-isolated-worktree-lifecycle-4e6ab968`, and required template headings
+  present. Human review and merge remain pending.
