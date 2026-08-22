@@ -1,12 +1,31 @@
 import { listProjectItems, reconcileProjectItemLifecycle, reconcileResolvedTaskStatus, resolveTaskIssue } from "@/lib/server/github";
-import { getProject, getTaskByIssue, getTasksByProject, touchProject, updateTaskIssue, upsertSyncedTask } from "@/lib/server/repository";
+import { claimIdempotencyKey, completeIdempotencyKey, getProject, getTaskByIssue, getTasksByProject, touchProject, updateTaskIssue, upsertSyncedTask } from "@/lib/server/repository";
+import { apiError, apiErrorFrom, apiResponse, assertAllowedKeys, getIdempotencyKey, idempotencyResponse, parseJsonBody, requestFingerprint, validateIdentifier } from "@/lib/server/api";
 
-export async function POST(_request: Request, { params }: { params: Promise<{ projectId: string }> }) {
-  const { projectId } = await params;
-  if (process.env.EXECUTION_MODE !== "live") { touchProject(projectId); return Response.json({ ok: true, mode: "demo", count: 0, repairedIssues: 0, syncedAt: new Date().toISOString() }); }
-  const project = getProject(projectId);
-  if (!project) return Response.json({ error: "Project not found." }, { status: 404 });
+export async function POST(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
+  const { projectId: rawProjectId } = await params;
+  let projectId: string;
   try {
+    projectId = validateIdentifier(rawProjectId, "projectId");
+    const body = await parseJsonBody(request, { allowEmpty: true });
+    assertAllowedKeys(body, []);
+  } catch (error) {
+    return apiErrorFrom(error, "The sync request could not be completed.");
+  }
+  const project = getProject(projectId);
+  if (!project) return apiError("PROJECT_NOT_FOUND", "Project not found.", 404);
+  try {
+    const key = getIdempotencyKey(request);
+    const operation = "project.sync";
+    const fingerprint = requestFingerprint({ projectId });
+    const claim = claimIdempotencyKey(key!, operation, fingerprint);
+    if (claim.kind !== "new") return claim.kind === "replay" ? apiResponse(claim.response, claim.status) : idempotencyResponse(claim);
+    if (process.env.EXECUTION_MODE !== "live") {
+      touchProject(projectId);
+      const payload = { ok: true, mode: "demo", count: 0, repairedIssues: 0, syncedAt: new Date().toISOString() };
+      completeIdempotencyKey(key!, operation, fingerprint, payload, 200);
+      return apiResponse(payload);
+    }
     let items = await listProjectItems(project);
     let repairedIssues = 0;
     let imported = 0;
@@ -35,6 +54,11 @@ export async function POST(_request: Request, { params }: { params: Promise<{ pr
     }
     items.forEach((item) => upsertSyncedTask({ projectId, ...item }));
     touchProject(projectId);
-    return Response.json({ ok: true, mode: "live", count: items.length, imported, updated, repairedIssues, createdIssues, correctedIssues, addedProjectItems, syncedAt: new Date().toISOString() });
-  } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "GitHub sync failed." }, { status: 502 }); }
+    const payload = { ok: true, mode: "live", count: items.length, imported, updated, repairedIssues, createdIssues, correctedIssues, addedProjectItems, syncedAt: new Date().toISOString() };
+    completeIdempotencyKey(key!, operation, fingerprint, payload, 200);
+    return apiResponse(payload);
+  } catch (error) {
+    if (error instanceof Error && "code" in error) return apiErrorFrom(error, "The sync request could not be completed.");
+    return apiError("GITHUB_SYNC_FAILED", "GitHub sync failed. Check the connection and try again.", 502);
+  }
 }
