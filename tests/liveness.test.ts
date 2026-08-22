@@ -17,6 +17,7 @@ process.env.EXECUTION_MODE = "demo";
 
 const repository = await import("../src/lib/server/repository.ts");
 const runtimeDatabase = (await import("../src/lib/server/db.ts")).db;
+const { runCline: runClineFromAnotherServerBoundary } = await import("../src/lib/server/cline.ts?dashboard-boundary");
 
 process.env.DATA_DIR = migrationDir;
 const migrationDatabase = (await import("../src/lib/server/db.ts?migration-initial")).db;
@@ -109,4 +110,40 @@ test("keeps Demo fixtures truthful and does not count a persisted Live row", () 
   assert.equal(liveDashboard.projects.some((project) => project.isDemo), false);
   assert.equal(liveDashboard.projects.find((project) => project.id === liveProject!.id)?.activeAgents, 0);
   assert.equal(liveDashboard.runs.find((run) => run.id === liveRun!.id)?.isActive, false);
+});
+
+test("shares active Cline sessions across server module boundaries", async () => {
+  const project = repository.createProject({ fullName: "maxlee98/cross-boundary-fixture", localPath: path.join(runtimeDir, "cross-boundary-fixture") });
+  const task = repository.createTask({ projectId: project!.id, title: "Cross-boundary active run" });
+  const run = repository.createRun({ taskId: task!.id, mode: "start" });
+  assert.ok(run);
+
+  let activeCountDuringSend = 0;
+  const fakeCore = {
+    subscribe: () => () => undefined,
+    async start() {
+      return { sessionId: "cross-boundary-session" };
+    },
+    async send() {
+      activeCountDuringSend = repository.getDashboard().projects.find((candidate) => candidate.id === project!.id)?.activeAgents ?? 0;
+      return { text: "done", finishReason: "completed" };
+    },
+    async getAccumulatedUsage() {
+      return {};
+    },
+    async dispose() {
+      return undefined;
+    },
+  };
+
+  await runClineFromAnotherServerBoundary({
+    runId: run!.id,
+    task: task!,
+    project: project!,
+    prompt: "complete the fixture",
+    workspacePath: "/tmp/cross-boundary-fixture",
+  }, { onActivity: () => undefined, onEvent: () => undefined }, { createCore: async () => fakeCore as never });
+
+  assert.equal(activeCountDuringSend, 1);
+  assert.equal(repository.getDashboard().projects.find((candidate) => candidate.id === project!.id)?.activeAgents, 0);
 });

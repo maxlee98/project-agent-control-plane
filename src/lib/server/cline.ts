@@ -5,6 +5,11 @@ import { shouldPublishGithubCheckpoint, type RunEventDraft } from "../domain";
 import { readRunUsage, type RunUsageSnapshot } from "./cost";
 import { redactSecrets } from "./redaction";
 
+declare global {
+  // eslint-disable-next-line no-var
+  var activeControlPlaneClineSessions: Map<string, { cline: ClineCore; sessionId: string }> | undefined;
+}
+
 export interface ClineCallbacks {
   onActivity(message: string, detail?: string | null): void;
   onEvent(event: RunEventDraft): void;
@@ -19,7 +24,8 @@ export interface ClineRuntimeDependencies {
   createCore?: (options?: ClineCreateOptions) => Promise<ClineCore>;
 }
 
-const activeSessions = new Map<string, { cline: ClineCore; sessionId: string }>();
+const activeSessions = globalThis.activeControlPlaneClineSessions ?? new Map<string, { cline: ClineCore; sessionId: string }>();
+globalThis.activeControlPlaneClineSessions = activeSessions;
 
 export function hasActiveClineSession(runId: string) {
   return activeSessions.has(runId);
