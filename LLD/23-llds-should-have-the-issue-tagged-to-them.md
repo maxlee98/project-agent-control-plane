@@ -160,7 +160,7 @@ database, application, GitHub Issue, Project, PR, or deployment rollback is requ
 - [x] Implementation self-review completed
 - [x] Tests, typecheck, and diff checks passed; production build retains a pre-existing failure
 - [x] LLD updated with actual validation results
-- [ ] Issue-linked PR created and remotely verified
+- [x] Issue-linked PR created and remotely verified
 - [ ] Human merge approval remains pending
 
 ## Validation results
@@ -181,8 +181,10 @@ database, application, GitHub Issue, Project, PR, or deployment rollback is requ
 
 ## Handoff notes
 
-- Implementation commit: `71d5311` (`docs: prefix LLD filenames with issue numbers`).
+- Implementation commit: `f939da0924bffec53574def9d68f33521430adde` (`docs: prefix LLD filenames with issue numbers`).
 - Feature branch: `agent/23-LLDs-should-have-the-issue-tagged--594c652d`; it is one commit ahead of
-  the local `origin/main` snapshot. Remote freshness must be rechecked after publishing the branch.
-- PR creation remains pending because the branch has not yet been pushed and the required PR body
-  must use the renamed canonical LLD path plus `Fixes #23`.
+  `origin/main`; remote freshness was reverified after publishing the branch with `ahead=1,
+  behind=0`.
+- Pull request: [#56](https://github.com/maxlee98/project-agent-control-plane/pull/56), verified open
+  with base `main`, head `agent/23-LLDs-should-have-the-issue-tagged--594c652d`, complete template,
+  and `Fixes #23`. The `PR template` check passed; `validate` remained pending at handoff.
