@@ -4,7 +4,9 @@ import { redactSecrets } from "./redaction";
 import { normalizeLocalPath } from "./paths";
 import { hasActiveClineSession } from "./cline";
 import { normalizeRunEventType } from "../domain";
-import type { ActivityItem, AgentRun, DashboardData, Project, RunCheck, RunCostSource, RunEvent, RunEventType, Task, TaskCostStatus, TaskStatus } from "../domain";
+import type { ActivityItem, AgentRun, DashboardData, Project, ReasoningEffort, RunCheck, RunCostSource, RunEvent, RunEventType, Task, TaskCostStatus, TaskStatus } from "../domain";
+import { getReasoningCapabilitySync, validateReasoningEffortSync } from "./reasoning";
+import { isReasoningEffort } from "../domain";
 
 type ProjectRow = Record<string, unknown>;
 type TaskRow = Record<string, unknown>;
@@ -99,6 +101,7 @@ export function mapRun(row: RunRow): AgentRun {
     executionMode,
     providerId: String(row.provider_id ?? ""),
     modelId: String(row.model_id ?? ""),
+    reasoningEffort: isReasoningEffort(row.reasoning_effort) ? row.reasoning_effort : null,
     inputTokens: Number(row.input_tokens ?? 0),
     outputTokens: Number(row.output_tokens ?? 0),
     cacheReadTokens: Number(row.cache_read_tokens ?? 0),
@@ -164,6 +167,7 @@ export function getDashboard(): DashboardData {
         : liveReady
           ? null
           : "Live mode needs CLINE_API_KEY and GITHUB_TOKEN before it can modify repositories.",
+      reasoning: getReasoningCapabilitySync(process.env.CLINE_PROVIDER_ID ?? "anthropic", process.env.CLINE_MODEL_ID ?? "claude-sonnet-4-5"),
     },
   };
 }
@@ -293,7 +297,7 @@ export function touchProject(projectId: string) {
   addActivity({ projectId, type: "sync", title: "GitHub sync completed", detail: "Project items and issue metadata are up to date.", tone: "cyan" });
 }
 
-export function createRun(input: { taskId: string; mode: AgentRun["mode"] }) {
+export function createRun(input: { taskId: string; mode: AgentRun["mode"]; reasoningEffort?: ReasoningEffort | null }) {
   const task = getTask(input.taskId);
   if (!task) return null;
   const now = isoNow();
@@ -301,9 +305,10 @@ export function createRun(input: { taskId: string; mode: AgentRun["mode"] }) {
   const executionMode = process.env.EXECUTION_MODE === "live" ? "live" : "demo";
   const providerId = process.env.CLINE_PROVIDER_ID ?? "anthropic";
   const modelId = process.env.CLINE_MODEL_ID ?? "claude-sonnet-4-5";
+  const reasoningEffort = validateReasoningEffortSync(providerId, modelId, input.reasoningEffort);
   const costSource = executionMode === "live" ? "pending" : "unavailable";
-  db.prepare(`INSERT INTO runs (id, task_id, project_id, mode, status, progress, current_activity, started_at, execution_mode, provider_id, model_id, cost_source) VALUES (?, ?, ?, ?, 'queued', 0, 'Queued for dispatch', ?, ?, ?, ?, ?)`)
-    .run(id, task.id, task.projectId, input.mode, now, executionMode, providerId, modelId, costSource);
+  db.prepare(`INSERT INTO runs (id, task_id, project_id, mode, status, progress, current_activity, started_at, execution_mode, provider_id, model_id, reasoning_effort, cost_source) VALUES (?, ?, ?, ?, 'queued', 0, 'Queued for dispatch', ?, ?, ?, ?, ?, ?)`)
+    .run(id, task.id, task.projectId, input.mode, now, executionMode, providerId, modelId, reasoningEffort, costSource);
   updateTask(task.id, { status: "in_progress", agentState: "running", summary: "Agent is preparing an isolated workspace." });
   addActivity({ projectId: task.projectId, taskId: task.id, runId: id, type: "run_started", title: `${input.mode === "start" ? "Agent started" : "Agent continued"}`, detail: task.title, tone: "amber" });
   addRunEvent(id, "run_started", "Run claimed by the local orchestrator", "Workspace and workflow preparation are next.");

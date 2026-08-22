@@ -1,4 +1,4 @@
-import type { AgentRun, Project, Task } from "./domain";
+import type { AgentRun, Project, ReasoningEffort, Task } from "./domain";
 
 /**
  * Stable boundary between the control plane and GitHub Projects V2.
@@ -33,6 +33,7 @@ export interface AgentRunInput {
   project: Project;
   prompt: string;
   workspacePath: string;
+  reasoningEffort?: ReasoningEffort | null;
 }
 
 export interface AgentHandle {

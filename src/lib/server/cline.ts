@@ -1,5 +1,6 @@
 import { ClineCore } from "@cline/sdk";
 import type { AgentRunInput } from "../integrations";
+import type { ReasoningEffort } from "../domain";
 import { shouldPublishGithubCheckpoint, type RunEventDraft } from "../domain";
 import { readRunUsage, type RunUsageSnapshot } from "./cost";
 import { redactSecrets } from "./redaction";
@@ -224,7 +225,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string, o
   });
 }
 
-export async function runCline(input: AgentRunInput & { runId: string; providerId?: string; modelId?: string }, callbacks: ClineCallbacks, dependencies: ClineRuntimeDependencies = {}) {
+export async function runCline(input: AgentRunInput & { runId: string; providerId?: string; modelId?: string; reasoningEffort?: ReasoningEffort | null }, callbacks: ClineCallbacks, dependencies: ClineRuntimeDependencies = {}) {
   const createCore = dependencies.createCore ?? ClineCore.create;
   const cline = await createCore({ clientName: "project-agent-control-plane", backendMode: "local" });
   const providerId = input.providerId ?? process.env.CLINE_PROVIDER_ID ?? "anthropic";
@@ -309,22 +310,24 @@ export async function runCline(input: AgentRunInput & { runId: string; providerI
 
   try {
     const deadline = Date.now() + maxDurationMs;
+    const config = {
+      providerId,
+      modelId,
+      apiKey: process.env.CLINE_API_KEY,
+      systemPrompt: "You are an autonomous coding agent. Work only in the assigned workspace. Make focused changes, run validation, and report a concise handoff.",
+      cwd: input.workspacePath,
+      enableTools: true,
+      enableSpawnAgent: false,
+      enableAgentTeams: false,
+      yolo: true,
+      checkpoint: { enabled: true },
+      ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+    };
     const startPromise = cline.start({
       source: "cli",
       mode: "automation",
       interactive: false,
-      config: {
-        providerId,
-        modelId,
-        apiKey: process.env.CLINE_API_KEY,
-        systemPrompt: "You are an autonomous coding agent. Work only in the assigned workspace. Make focused changes, run validation, and report a concise handoff.",
-        cwd: input.workspacePath,
-        enableTools: true,
-        enableSpawnAgent: false,
-        enableAgentTeams: false,
-        yolo: true,
-        checkpoint: { enabled: true },
-      },
+      config,
     });
     const result = await withTimeout(startPromise, maxDurationMs, "startup", () => stopAfterTimeout(timeoutError("startup")));
     sessionId = result.sessionId.trim();

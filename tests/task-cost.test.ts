@@ -71,6 +71,7 @@ test("persists task cost estimates in cents and maps them back to USD", () => {
   assert.equal(runColumns.includes("provider_id"), true);
   assert.equal(runColumns.includes("model_id"), true);
   assert.equal(runColumns.includes("actual_cost_micros"), true);
+  assert.equal(runColumns.includes("reasoning_effort"), true);
 
   const seededTask = repository.getTask("task-live-overview");
   assert.equal(seededTask?.estimatedCostUsd, 0);
@@ -85,6 +86,23 @@ test("persists task cost estimates in cents and maps them back to USD", () => {
   assert.equal(updated?.estimatedCostUsd, 5.67);
   assert.equal(database.prepare("SELECT estimated_cost_cents FROM tasks WHERE id = ?").get(task!.id)?.estimated_cost_cents, 567);
   assert.equal(updated?.title, "Task with a budget");
+});
+
+test("persists supported reasoning effort as an immutable run snapshot", () => {
+  const previousProvider = process.env.CLINE_PROVIDER_ID;
+  const previousModel = process.env.CLINE_MODEL_ID;
+  process.env.CLINE_PROVIDER_ID = "openai-native";
+  process.env.CLINE_MODEL_ID = "gpt-5.4";
+  const task = repository.createTask({ projectId: "project-control-plane", title: "Task with reasoning effort" });
+  assert.ok(task);
+  const run = repository.createRun({ taskId: task!.id, mode: "start", reasoningEffort: "high" });
+  assert.equal(run?.reasoningEffort, "high");
+  assert.equal(database.prepare("SELECT reasoning_effort FROM runs WHERE id = ?").get(run!.id)?.reasoning_effort, "high");
+  assert.throws(() => repository.createRun({ taskId: task!.id, mode: "retry", reasoningEffort: "max" }), /not supported/);
+  if (previousProvider === undefined) delete process.env.CLINE_PROVIDER_ID;
+  else process.env.CLINE_PROVIDER_ID = previousProvider;
+  if (previousModel === undefined) delete process.env.CLINE_MODEL_ID;
+  else process.env.CLINE_MODEL_ID = previousModel;
 });
 
 test("aggregates immutable run costs while retaining the provider and model used by each run", () => {
