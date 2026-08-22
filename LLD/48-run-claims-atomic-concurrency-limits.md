@@ -158,7 +158,7 @@ can drop only claim enforcement after backing up local data if necessary.
 - Focused claim suite: passed, 3 tests covering duplicate request ownership, project/global limits,
   configured dashboard capacity, terminal release, and expired-lease recovery.
 - `npm run typecheck`: passed with no TypeScript diagnostics.
-- `npm test`: 74 tests passed; 2 pre-existing LLD naming failures remain for the historical
+- `npm test`: 82 tests passed; 2 pre-existing LLD naming failures remain for the historical
   `LLD/live-history-expansion.md` exception, unrelated to this change.
 - `git diff --check`: passed.
 - `npm run build`: compiled and passed TypeScript, but Next prerendering failed in the existing
