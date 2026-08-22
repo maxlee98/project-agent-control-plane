@@ -25,7 +25,8 @@ false even while Cline is working.
 
 ## Non-goals
 
-- Do not change the meaning of runtime liveness established by `agent-liveness-and-project-deduplication.md`.
+- Do not change the meaning of runtime liveness established by the pre-issue-tracking legacy document
+  `agent-liveness-and-project-deduplication.md`.
 - Do not add a distributed worker or websocket transport.
 - Do not alter unrelated task, project, GitHub, or cost behavior.
 - Do not merge the pull request automatically.
