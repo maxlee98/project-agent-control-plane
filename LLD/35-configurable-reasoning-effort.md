@@ -85,7 +85,7 @@ are never returned by capability endpoints or persisted snapshots.
 
 ## Affected files and boundaries
 
-- `LLD/configurable-reasoning-effort.md`: design and validation record.
+- `LLD/35-configurable-reasoning-effort.md`: design and validation record.
 - `src/lib/domain.ts`: effort type, run snapshot, capability response contract.
 - `src/lib/server/db.ts`: additive runs-column migration.
 - `src/lib/server/reasoning.ts` (or equivalent): SDK capability normalization and validation.

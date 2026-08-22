@@ -126,7 +126,7 @@ Persistence and GitHub adapters retain their existing defense-in-depth redaction
 - `tests/live-run.test.ts`: existing lifecycle compatibility assertions, if callback shape changes
   require updates.
 - `workflows/default/WORKFLOW.md`: explicit local-event versus external-checkpoint policy.
-- `LLD/translate-clinecore-events.md`: verified decisions and validation results.
+- `LLD/22-translate-clinecore-events.md`: verified decisions and validation results.
 
 ## Risks and mitigations
 

@@ -78,7 +78,7 @@ GitHub comment failure -> local warning event/activity -> Live run continues
 - `src/lib/server/issue-checkpoints.ts`: throttled, ordered, best-effort publisher.
 - `src/lib/server/orchestrator.ts`: lifecycle/progress integration and cleanup.
 - `tests/issue-checkpoints.test.ts`: interval, queue, failure, and body regressions.
-- `LLD/github-issue-agent-checkpoints.md`: durable design and validation record.
+- `LLD/18-github-issue-agent-checkpoints.md`: durable design and validation record.
 
 ## Risks, edge cases, and rollback
 
