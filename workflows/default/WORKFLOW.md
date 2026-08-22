@@ -81,6 +81,8 @@ You are working on a task selected by the Project Agent Control Plane.
   Historical LLDs without a verifiable Issue identity may remain under the documented legacy naming
   exception.
 - A PR must describe the problem, goals/non-goals, design, affected boundaries, migrations, validation results, security review, risks, and follow-ups.
+- Every PR title must use a supported Conventional Commit-style prefix (`feat:`, `fix:`, `docs:`,
+  `refactor:`, `test:`, `chore:`, `perf:`, `build:`, `ci:`, or `revert:`) followed by a description.
 - Before a remote write, verify local status, diff whitespace, commit SHA, branch, and relevant checks. Query remote state before retrying an interrupted push or PR operation.
 - Local commits are not a completed handoff until the dedicated branch and PR are verified remotely.
 

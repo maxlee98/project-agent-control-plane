@@ -1,4 +1,5 @@
 import type { AgentRun, Project, Task, TaskStatus } from "../domain";
+import { normalizePrTitle } from "../pr-title";
 
 function githubRequest(path: string, init: RequestInit = {}) {
   const token = process.env.GITHUB_TOKEN;
@@ -319,7 +320,7 @@ export async function createPullRequest(fullName: string, task: Task, run: Agent
   const existing = await findOpenPullRequest(owner, repo, head, base);
   if (existing) return existing;
 
-  const response = await githubRequest(`/repos/${owner}/${repo}/pulls`, { method: "POST", body: JSON.stringify({ title: task.title, head, base, body: `Fixes #${task.issueNumber}\n\n${task.currentSummary}\n\nCommit: ${run.commitSha ?? "not recorded"}` }) });
+  const response = await githubRequest(`/repos/${owner}/${repo}/pulls`, { method: "POST", body: JSON.stringify({ title: normalizePrTitle(task.title, task.labels), head, base, body: `Fixes #${task.issueNumber}\n\n${task.currentSummary}\n\nCommit: ${run.commitSha ?? "not recorded"}` }) });
   if (response.status === 422) {
     const createdByRetry = await findOpenPullRequest(owner, repo, head, base);
     if (createdByRetry) return createdByRetry;

@@ -4,6 +4,9 @@
 - **LLD:** <!-- Link `LLD/<issue-number>-<task-slug>.md`; the filename must carry the verified canonical Issue number. Explain if this is a historical legacy LLD exception. -->
 - **PR type:** <!-- Feature / bug fix / refactor / docs / test / configuration / migration -->
 
+Pull request titles must use `<type>: <description>` format, for example `feat: add task filtering`
+or `fix(api): prevent duplicate handoffs`.
+
 ## Problem
 
 <!-- What was observed? Who or what is affected? Include evidence without secrets or raw credentials. -->

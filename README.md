@@ -123,6 +123,9 @@ Every PR must use `.github/pull_request_template.md`, link the control-plane tas
 describe the problem, goals, design, affected boundaries, validation results, security review,
 risks, and follow-ups. Verify local checks and remote branch/PR state before reporting handoff.
 Every PR must also explicitly link one canonical GitHub Issue with `Fixes #123` or `Closes #123`.
+Every PR title must use a Conventional Commit-style prefix: `feat`, `fix`, `docs`, `refactor`, `test`,
+`chore`, `perf`, `build`, `ci`, or `revert`, followed by a colon and description (for example,
+`feat: add task filtering`).
 The closing keyword creates the GitHub Development relationship and closes the Issue when the PR is
 merged, allowing the existing Issue-only Projects board item to move to Done. The PR is linked
 implementation work and is not added as a second board item.

@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { assertFreshComparison } from "./branch-freshness.mjs";
 import { assertValidPrBody, readTemplate } from "./pr-template.mjs";
+import { assertValidPrTitle } from "./pr-title.mjs";
 
 function argumentValue(args, name) {
   const index = args.indexOf(name);
@@ -30,6 +31,7 @@ if (!head || !base || !bodyFile) {
   process.stderr.write("usage: create-pr [--title <title> | --title-file <path>] --head <branch> --base <branch> --body-file <path>\n");
   process.exit(2);
 }
+if (title) assertValidPrTitle(title);
 if (!token) {
   process.stderr.write("GitHub credential helper or GITHUB_TOKEN is unavailable; PR write was not attempted.\n");
   process.exit(2);
