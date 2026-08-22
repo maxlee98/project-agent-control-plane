@@ -2,8 +2,7 @@ export const BOARD_COLUMNS = [
   { id: "inbox", label: "Inbox", color: "slate" },
   { id: "ready", label: "Ready", color: "cyan" },
   { id: "in_progress", label: "In progress", color: "amber" },
-  { id: "agent_review", label: "Agent review", color: "violet" },
-  { id: "human_review", label: "Human review", color: "rose" },
+  { id: "human_review", label: "Review", color: "rose" },
   { id: "blocked", label: "Blocked", color: "red" },
   { id: "done", label: "Done", color: "emerald" },
 ] as const;
@@ -26,6 +25,14 @@ export interface ReasoningCapability {
 
 export function isReasoningEffort(value: unknown): value is ReasoningEffort {
   return typeof value === "string" && (REASONING_EFFORTS as readonly string[]).includes(value);
+}
+
+/** Keep legacy persisted/API values readable while exposing one canonical review state. */
+export function normalizeTaskStatus(value: unknown): TaskStatus {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase().replace(/[\s-]+/g, "_") : "";
+  if (normalized === "agent_review" || normalized === "in_review" || normalized === "human_review" || normalized === "review") return "human_review";
+  if ((BOARD_COLUMNS as readonly { id: string }[]).some((column) => column.id === normalized)) return normalized as TaskStatus;
+  return "inbox";
 }
 
 /** Stable vocabulary exposed by the control plane, not by an agent implementation. */

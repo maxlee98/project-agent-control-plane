@@ -57,3 +57,15 @@ test("ordinary non-Done status updates preserve the existing agent state", () =>
   assert.equal(updated?.agentState, "failed");
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM activity WHERE task_id = ? AND type = 'human_completion'").get(task!.id)?.count, 0);
 });
+
+test("projects legacy agent review rows as human Review without losing handoff metadata", () => {
+  const task = repository.createTask({ projectId: "project-control-plane", title: "Legacy review task", status: "ready" });
+  assert.ok(task);
+  database.prepare("UPDATE tasks SET status = 'agent_review', branch_name = ?, pr_url = ? WHERE id = ?")
+    .run("agent/legacy-review", "https://github.com/example/repo/pull/7", task!.id);
+
+  const normalized = repository.getTask(task!.id);
+  assert.equal(normalized?.status, "human_review");
+  assert.equal(normalized?.branchName, "agent/legacy-review");
+  assert.equal(normalized?.prUrl, "https://github.com/example/repo/pull/7");
+});

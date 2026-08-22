@@ -59,12 +59,12 @@ globalThis.fetch = async (input, init) => {
     return response({ data: {
       node: {
         __typename: "ProjectV2",
-        fields: { nodes: [{ id: "field-status", name: "Status", options: [{ id: "option-todo", name: "Todo" }, { id: "option-progress", name: "In Progress" }, { id: "option-done", name: "Done" }] }] },
+        fields: { nodes: [{ id: "field-status", name: "Status", options: [{ id: "option-todo", name: "Todo" }, { id: "option-progress", name: "In Progress" }, { id: "option-review", name: "Review" }, { id: "option-done", name: "Done" }] }] },
         items: { nodes: [
           {
             id: "item-10",
             content: { __typename: "Issue", id: "issue-node-10", number: 10, title: "Task #10", body: "", state: issueState === "closed" ? "CLOSED" : "OPEN", url: "https://github.com/maxlee98/project-agent-control-plane/issues/10", repository: { nameWithOwner: "maxlee98/project-agent-control-plane" }, labels: { nodes: [] } },
-            fieldValues: { nodes: [{ field: { id: "field-status", name: "Status" }, name: statusName, optionId: statusName === "Done" ? "option-done" : "option-progress" }] },
+            fieldValues: { nodes: [{ field: { id: "field-status", name: "Status" }, name: statusName, optionId: statusName === "Done" ? "option-done" : statusName === "Review" ? "option-review" : "option-progress" }] },
           },
           ...(projectItemVisible ? [{
             id: "item-14",
@@ -117,6 +117,35 @@ test("reads Projects V2 metadata and repairs a Done issue lifecycle", async () =
   assert.deepEqual(calls.at(-1)?.body, { state: "closed", state_reason: "completed" });
 });
 
+test("maps the exact Projects V2 Review option to the human review state", async () => {
+  calls.length = 0;
+  issueState = "open";
+  statusName = "Review";
+  addedIssue = false;
+  projectItemVisibilityDelay = 0;
+  const items = await github.listProjectItems(project());
+  assert.equal(items[0]?.status, "human_review");
+  assert.equal(items[0]?.statusMapped, true);
+  assert.equal(items[0]?.statusOptionId, "option-review");
+});
+
+test("keeps legacy review aliases readable without treating In Progress as Review", async () => {
+  calls.length = 0;
+  issueState = "open";
+  addedIssue = false;
+  projectItemVisibilityDelay = 0;
+
+  statusName = "Agent Review";
+  const legacyItems = await github.listProjectItems(project());
+  assert.equal(legacyItems[0]?.status, "human_review");
+  assert.equal(legacyItems[0]?.statusMapped, true);
+
+  statusName = "In Progress";
+  const activeItems = await github.listProjectItems(project());
+  assert.equal(activeItems[0]?.status, "in_progress");
+  assert.equal(activeItems[0]?.statusMapped, true);
+});
+
 test("updates the Projects V2 option and reopens an issue for a non-Done status", async () => {
   calls.length = 0;
   issueState = "closed";
@@ -131,6 +160,19 @@ test("updates the Projects V2 option and reopens an issue for a non-Done status"
   const mutation = calls.find((call) => call.url.endsWith("/graphql") && String(call.body?.query).includes("updateProjectV2ItemFieldValue"));
   assert.equal((mutation?.body?.variables as Record<string, unknown>).optionId, "option-progress");
   assert.deepEqual(calls.at(-1)?.body, { state: "open", state_reason: "reopened" });
+});
+
+test("prefers the exact Review option when handing off a task", async () => {
+  calls.length = 0;
+  issueState = "open";
+  statusName = "In Progress";
+  addedIssue = false;
+  projectItemVisibilityDelay = 0;
+  issueListing = [];
+  const result = await github.reconcileTaskStatus(project(), { issueNumber: 10, title: "Task #10", description: "", githubUrl: "https://github.com/maxlee98/project-agent-control-plane/issues/10" }, "human_review");
+  assert.equal(result.projectChanged, true);
+  const mutation = calls.find((call) => call.url.endsWith("/graphql") && String(call.body?.query).includes("updateProjectV2ItemFieldValue"));
+  assert.equal((mutation?.body?.variables as Record<string, unknown>).optionId, "option-review");
 });
 
 test("rejects missing project configuration and unmapped status options", async () => {
@@ -160,7 +202,7 @@ test("adds a newly created Issue to Projects V2 exactly once", async () => {
     statusOptionId: "option-todo",
     statusOptionName: "Todo",
     statusMapped: true,
-    statusOptions: [{ id: "option-todo", name: "Todo" }, { id: "option-progress", name: "In Progress" }, { id: "option-done", name: "Done" }],
+    statusOptions: [{ id: "option-todo", name: "Todo" }, { id: "option-progress", name: "In Progress" }, { id: "option-review", name: "Review" }, { id: "option-done", name: "Done" }],
     issueNumber: 14,
     issueState: "open",
     title: "New Issue",

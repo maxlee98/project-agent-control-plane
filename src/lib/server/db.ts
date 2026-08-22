@@ -136,6 +136,7 @@ function createDatabase() {
 
   const taskColumns = database.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
   if (!new Set(taskColumns.map((column) => column.name)).has("estimated_cost_cents")) database.exec("ALTER TABLE tasks ADD COLUMN estimated_cost_cents INTEGER NOT NULL DEFAULT 0");
+  database.prepare("UPDATE tasks SET status = 'human_review' WHERE lower(replace(replace(status, ' ', '_'), '-', '_')) IN ('agent_review', 'in_review', 'human_review', 'review')").run();
 
   const projectColumns = database.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>;
   if (!new Set(projectColumns.map((column) => column.name)).has("is_demo")) database.exec("ALTER TABLE projects ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0");
@@ -270,7 +271,7 @@ function seedDatabase(database: Database.Database) {
       issueNumber: 21,
       title: "Add exportable progress snapshots",
       description: "Save a useful summary of an analysis run so it can be picked up later.",
-      status: "agent_review",
+      status: "human_review",
       priority: 2,
       labels: ["feature", "markdown"],
       assignee: "Agent",

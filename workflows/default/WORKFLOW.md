@@ -61,6 +61,8 @@ You are working on a task selected by the Project Agent Control Plane.
 - Agents MUST NOT send abbreviated ad-hoc PR bodies through REST, curl, or custom one-off payloads.
 - After the remote write, query and verify the PR number, URL, state, base, head, and body contract.
 - The CI template gate must pass before the task is moved to human review. Never merge automatically.
+- Successful agent work is handed off to the GitHub Projects `Review` column for human review; no
+  automated PR reviewer is implied.
 
 ## Feature-branch freshness
 

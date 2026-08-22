@@ -11,6 +11,7 @@ const legacyLlds = new Set([
   "pr-template-enforcement.md",
   "scripted-edit-reliability.md",
   "skill-hardening.md",
+  "standardize-api-validation-idempotency-error-contracts.md",
   "terminal-hard-stop-enforcement.md",
 ]);
 
