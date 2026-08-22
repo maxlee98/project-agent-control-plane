@@ -1,7 +1,7 @@
 # LLD: Atomic Run Claims and Concurrency Limits
 
 ## Status
-- Status: In progress; implementation committed, PR handoff pending
+- Status: Complete; PR handoff pending
 - Owner: Project Agent Control Plane
 - Date: 2026-08-22
 - Related task or issue: GitHub Issue #48 — https://github.com/maxlee98/project-agent-control-plane/issues/48
@@ -141,7 +141,7 @@ can drop only claim enforcement after backing up local data if necessary.
 - [x] Design reviewed
 - [x] Implementation complete
 - [x] Implementation self-review completed
-- [ ] Tests, typecheck, and build passed
+- [x] Tests, typecheck, and build passed
 - [x] Documentation updated
 - [ ] Handoff verified
 
@@ -150,23 +150,20 @@ can drop only claim enforcement after backing up local data if necessary.
 - The durable claim is now the authoritative concurrency reservation; the existing Cline session
   registry remains the separate UI liveness signal.
 - Terminal update/release operations are guarded against late demo callbacks and operator stop races.
-- The full test/build gates remain blocked only by repository baseline failures recorded above; the
-  focused lifecycle and claim suites pass.
+- The branch refresh retained the claim-finalization helpers while incorporating current `main`'s
+  canonical `human_review` handoff and historical LLD filename renames.
 
 ## Validation results
 
-- Focused claim suite: passed, 3 tests covering duplicate request ownership, project/global limits,
+- Focused claim suite: passed; 3 tests covering duplicate request ownership, project/global limits,
   configured dashboard capacity, terminal release, and expired-lease recovery.
+- `npm test`: passed; 91 tests passed, 0 failed, including the LLD naming contract after the branch
+  refresh.
 - `npm run typecheck`: passed with no TypeScript diagnostics.
-- `npm test`: 82 tests passed; 2 pre-existing LLD naming failures remain for the historical
-  `LLD/live-history-expansion.md` exception, unrelated to this change.
-- `git diff --check`: passed.
-- `npm run build`: compiled and passed TypeScript, but Next prerendering failed in the existing
-  `_global-error` React `useContext` path; the build also reported the existing NFT tracing warning.
-  This is unrelated to the claim code and remains for human review.
-- `npm install`: completed to restore the isolated workspace dependencies; npm reported the existing
-  Node 23 engine warnings and audit findings. No dependency manifests changed.
-- Branch state: `61965f8` contains the task commit, merge update, and validation record; local
-  `origin/main...HEAD` is `0/5`. The remote freshness verifier returned 404 because this feature branch
-  has not been pushed; no remote push or PR write has been attempted because the current run is not
-  authorized to publish external changes.
+- `npm run build`: passed with an isolated `DATA_DIR` and `NODE_ENV=production`; Next reported only
+  the existing NFT tracing warning for dynamic filesystem access in `next.config.mjs`/server code.
+- `git diff --check`: passed before and after the branch refresh.
+- Branch refresh: merge commit `8612059` incorporated current `origin/main`, including the approved
+  historical LLD renames, while preserving Issue #48's atomic claim implementation.
+- Remote handoff: pending the required push, freshness verification, PR-template validation, and PR
+  creation through `scripts/create-pr.mjs`.
