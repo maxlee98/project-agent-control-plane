@@ -80,8 +80,9 @@ to be a warning after the PR is complete, but it lacks an end-to-end regression 
 - `src/lib/server/redaction.ts`: secret redaction at persistence boundaries.
 - `tests/live-run.test.ts`: new isolated mocked end-to-end live-run and failure-boundary coverage.
 - `docs/architecture.md`: documented bounded Live-mode verification procedure.
-- Related existing LLDs: `LLD/agent-liveness-and-project-deduplication.md`,
-  `LLD/task-cost-visibility.md`, and `LLD/issue-linked-pr-handoff.md`.
+- Related existing LLDs: the pre-issue-tracking legacy document
+  `LLD/agent-liveness-and-project-deduplication.md`, `LLD/21-task-cost-visibility.md`, and
+  `LLD/28-issue-linked-pr-handoff.md`.
 
 ## Proposed design
 

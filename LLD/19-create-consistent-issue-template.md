@@ -90,7 +90,7 @@ The change has no SQLite schema, API, or remote data migration. Existing issues 
 
 ## Affected files and boundaries
 
-- `LLD/create-consistent-issue-template.md`: durable design and validation record.
+- `LLD/19-create-consistent-issue-template.md`: durable design and validation record.
 - `.github/ISSUE_TEMPLATE/task.md`: canonical generic issue body.
 - `.github/ISSUE_TEMPLATE/config.yml`: issue-picker policy that disables blank issues.
 - `tests/issue-template.test.ts`: regression coverage for the repository issue-template contract.

@@ -103,7 +103,7 @@ No schema migration is required; `runs.workspace_path` and existing run event ty
 
 ## Affected files and boundaries
 
-- `LLD/isolated-worktree-lifecycle.md`: durable design and validation record.
+- `LLD/26-isolated-worktree-lifecycle.md`: durable design and validation record.
 - `src/lib/server/workspaces.ts`: exact worktree membership checks and deterministic lifecycle rules.
 - `src/lib/server/orchestrator.ts`: preserve workspace evidence across failures, if a focused change is
   required by tests.

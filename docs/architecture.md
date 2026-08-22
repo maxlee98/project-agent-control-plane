@@ -32,6 +32,10 @@ Every implementation PR must explicitly link its canonical GitHub Issue with `Fi
 `Closes #<number>`. The closing keyword creates the GitHub Development relationship and closes the
 Issue on merge; the Issue is the sole task item on the Issue-only Project board, and PRs are linked
 implementation artifacts rather than separate task items.
+Every Issue-backed LLD uses the matching human-readable path
+`LLD/<issue-number>-<task-slug>.md`; the Issue number is verified before the document is created.
+Pre-policy LLDs without a verifiable Issue identity are retained only as documented legacy
+exceptions.
 
 ## Integration seams
 
