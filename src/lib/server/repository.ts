@@ -23,6 +23,35 @@ const fromJson = (value: unknown): string[] => {
   }
 };
 
+export type DeduplicationClaim =
+  | { kind: "new" }
+  | { kind: "replay"; response: unknown; status: number }
+  | { kind: "conflict" }
+  | { kind: "in_progress" };
+
+export function claimIdempotencyKey(key: string, operation: string, fingerprint: string): DeduplicationClaim {
+  const now = isoNow();
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO request_deduplication (idempotency_key, operation, fingerprint, status, created_at)
+    VALUES (?, ?, ?, 'pending', ?)
+  `).run(key, operation, fingerprint, now);
+  const row = db.prepare("SELECT operation, fingerprint, status, response_json, response_status FROM request_deduplication WHERE idempotency_key = ?").get(key) as Record<string, unknown>;
+  if (row.operation !== operation || row.fingerprint !== fingerprint) return { kind: "conflict" };
+  if (insert.changes === 1) return { kind: "new" };
+  if (row.status === "completed" && typeof row.response_json === "string" && Number.isInteger(Number(row.response_status))) {
+    return { kind: "replay", response: JSON.parse(row.response_json), status: Number(row.response_status) };
+  }
+  return { kind: "in_progress" };
+}
+
+export function completeIdempotencyKey(key: string, operation: string, fingerprint: string, response: unknown, status: number) {
+  db.prepare(`
+    UPDATE request_deduplication
+    SET status = 'completed', response_json = ?, response_status = ?, completed_at = ?
+    WHERE idempotency_key = ? AND operation = ? AND fingerprint = ?
+  `).run(JSON.stringify(response), status, isoNow(), key, operation, fingerprint);
+}
+
 export function mapProject(row: ProjectRow): Project {
   return {
     id: String(row.id),

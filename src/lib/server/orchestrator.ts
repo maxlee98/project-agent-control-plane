@@ -267,6 +267,9 @@ export function startAgentRun(taskId: string, mode: AgentRun["mode"] = "start", 
 }
 
 export function stopAgentRun(runId: string) {
+  const existingRun = getRun(runId);
+  if (!existingRun) return null;
+  if (existingRun.status !== "queued" && existingRun.status !== "running") return existingRun;
   const timers = activeRuns.get(runId);
   timers?.forEach(clearTimeout);
   activeRuns.delete(runId);

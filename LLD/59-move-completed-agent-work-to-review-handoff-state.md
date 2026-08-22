@@ -101,10 +101,8 @@ focused code revert; no destructive database or GitHub operation is needed.
 - `npm install` — passed; installed dependencies. npm reported 20 audit findings and Node 23 engine
   warnings for transitive packages.
 - `npm run typecheck` — passed.
-- `npm test` — 77 passed, 2 failed in the pre-existing `tests/lld-naming.test.ts` checks for the
-  historical undocumented filenames `LLD/live-history-expansion.md` and
-  `LLD/standardize-pr-title-prefixes.md`; all task-status, GitHub synchronization, Live handoff, and
-  legacy compatibility tests passed.
+- `npm test` — 79 tests passed, 0 failures after the current `main` merge. The test suite still emits
+  existing Node experimental/module-type warnings.
 - `npm run safe:run -- --timeout-ms 120000 -- git diff --check` — passed.
 - `npm run build` — failed after successful compilation/typecheck during Next.js prerendering of
   `/_global-error` with `TypeError: Cannot read properties of null (reading 'useContext')`; the build
@@ -116,7 +114,15 @@ focused code revert; no destructive database or GitHub operation is needed.
 - [x] Design reviewed
 - [x] Implementation complete
 - [x] Implementation self-review completed
-- [ ] Tests, typecheck, and build passed (focused tests and typecheck passed; full suite has the
-  documented pre-existing LLD naming failures; build has the documented prerender failure)
+- [ ] Tests, typecheck, and build passed (tests and typecheck passed; build has the documented
+  existing prerender failure)
 - [x] Documentation updated
-- [ ] Handoff verified (branch/PR publication remains for the final handoff)
+- [x] Handoff verified (PR #60 is open; human review and merge remain pending)
+
+## Handoff
+- Branch: `agent/59-Task-Move-completed-agent-work-to--a81a662b`, pushed and verified fresh against
+  `main` with `ahead=2`, `behind=0` after merging current `origin/main`.
+- Commit: `df9086d` (includes the task implementation and current `main` merge).
+- Pull request: [#60](https://github.com/maxlee98/project-agent-control-plane/pull/60), verified open
+  with base `main`, head `agent/59-Task-Move-completed-agent-work-to--a81a662b`, validated template,
+  and `Fixes #59`. No merge was performed.
