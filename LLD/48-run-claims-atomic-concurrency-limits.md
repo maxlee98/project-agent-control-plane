@@ -1,7 +1,7 @@
 # LLD: Atomic Run Claims and Concurrency Limits
 
 ## Status
-- Status: In progress
+- Status: In progress; implementation committed, PR handoff pending
 - Owner: Project Agent Control Plane
 - Date: 2026-08-22
 - Related task or issue: GitHub Issue #48 — https://github.com/maxlee98/project-agent-control-plane/issues/48
@@ -166,3 +166,6 @@ can drop only claim enforcement after backing up local data if necessary.
   This is unrelated to the claim code and remains for human review.
 - `npm install`: completed to restore the isolated workspace dependencies; npm reported the existing
   Node 23 engine warnings and audit findings. No dependency manifests changed.
+- Branch state: `dbcf567` contains the task commit and merge update; `origin/main...HEAD` is `0/2`
+  (fresh locally), but no remote push or PR write has been attempted because the current run is not
+  authorized to publish external changes.
