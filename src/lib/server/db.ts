@@ -108,11 +108,22 @@ function createDatabase() {
       claimed_at TEXT NOT NULL,
       lease_expires_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS request_deduplication (
+      idempotency_key TEXT PRIMARY KEY,
+      operation TEXT NOT NULL,
+      fingerprint TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      response_json TEXT,
+      response_status INTEGER,
+      created_at TEXT NOT NULL,
+      completed_at TEXT
+    );
     CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status);
     CREATE INDEX IF NOT EXISTS idx_runs_task ON runs(task_id, started_at DESC);
     CREATE INDEX IF NOT EXISTS idx_activity_created ON activity(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_active_run_claims_project ON active_run_claims(project_id, execution_mode);
     CREATE INDEX IF NOT EXISTS idx_active_run_claims_lease ON active_run_claims(lease_expires_at);
+    CREATE INDEX IF NOT EXISTS idx_request_deduplication_operation ON request_deduplication(operation);
   `);
 
   // Keep local development databases forward-compatible when the app is upgraded.

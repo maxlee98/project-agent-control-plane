@@ -1,23 +1,51 @@
 import { startAgentRun } from "@/lib/server/orchestrator";
-import { db } from "@/lib/server/db";
-import { isRunClaimError } from "@/lib/server/repository";
+import { claimIdempotencyKey, completeIdempotencyKey, getRun, isRunClaimError } from "@/lib/server/repository";
 import { isReasoningEffort, type ReasoningEffort } from "@/lib/domain";
+import { apiError, apiErrorFrom, apiResponse, assertAllowedKeys, getIdempotencyKey, idempotencyResponse, parseJsonBody, requestFingerprint, validateIdentifier } from "@/lib/server/api";
 
 export async function POST(request: Request, { params }: { params: Promise<{ runId: string }> }) {
-  const { runId } = await params;
-  const row = db.prepare("SELECT task_id FROM runs WHERE id = ?").get(runId) as { task_id?: string } | undefined;
-  if (!row?.task_id) return Response.json({ error: "Run not found." }, { status: 404 });
-  const body = await request.json().catch(() => ({})) as { reasoningEffort?: unknown };
-  if (body.reasoningEffort !== undefined && body.reasoningEffort !== null && body.reasoningEffort !== "" && !isReasoningEffort(body.reasoningEffort)) {
-    return Response.json({ error: "Reasoning effort must be one of the supported effort values." }, { status: 400 });
-  }
-  let run;
   try {
-    run = startAgentRun(row.task_id, "continue", runId, body.reasoningEffort as ReasoningEffort | null | undefined);
+    const { runId: rawRunId } = await params;
+    const runId = validateIdentifier(rawRunId, "runId");
+    const body = await parseJsonBody(request);
+    assertAllowedKeys(body, ["reasoningEffort"]);
+    const reasoningEffort = body.reasoningEffort;
+    if (reasoningEffort !== undefined && reasoningEffort !== null && reasoningEffort !== "" && !isReasoningEffort(reasoningEffort)) {
+      return apiError("INVALID_ENUM", "reasoningEffort must be one of the supported effort values.", 400, { field: "reasoningEffort" });
+    }
+    const sourceRun = getRun(runId);
+    if (!sourceRun) return apiError("RUN_NOT_FOUND", "Run not found.", 404);
+    const key = getIdempotencyKey(request);
+    const operation = "run.continue";
+    const fingerprint = requestFingerprint({ runId, reasoningEffort: reasoningEffort || null });
+    const claim = claimIdempotencyKey(key!, operation, fingerprint);
+    if (claim.kind !== "new") return claim.kind === "replay" ? apiResponse(claim.response, claim.status) : idempotencyResponse(claim);
+    let run;
+    try {
+      run = startAgentRun(sourceRun.taskId, "continue", runId, reasoningEffort as ReasoningEffort | null | undefined);
+    } catch (error) {
+      if (isRunClaimError(error)) {
+        const payload = { code: error.code, message: error.message };
+        completeIdempotencyKey(key!, operation, fingerprint, payload, error.statusCode);
+        return apiResponse(payload, error.statusCode);
+      }
+      const payload = { code: "REASONING_UNSUPPORTED", message: "The selected reasoning effort is not supported by the configured model." };
+      completeIdempotencyKey(key!, operation, fingerprint, payload, 400);
+      return apiResponse(payload, 400);
+    }
+    if (!run) {
+      const payload = { code: "RUN_CONFLICT", message: "This run could not be continued." };
+      completeIdempotencyKey(key!, operation, fingerprint, payload, 409);
+      return apiResponse(payload, 409);
+    }
+    if ("error" in run && typeof run.error === "string") {
+      const payload = { code: "RUN_CONFLICT", message: "This task already has an active run." };
+      completeIdempotencyKey(key!, operation, fingerprint, payload, 409);
+      return apiResponse(payload, 409);
+    }
+    completeIdempotencyKey(key!, operation, fingerprint, run, 201);
+    return apiResponse(run, 201);
   } catch (error) {
-    if (isRunClaimError(error)) return Response.json({ error: error.message, code: error.code }, { status: error.statusCode });
-    return Response.json({ error: error instanceof Error ? error.message : "Reasoning effort is not supported by the configured model." }, { status: 400 });
+    return apiErrorFrom(error, "The run continuation request could not be completed.");
   }
-  if (!run) return Response.json({ error: "Could not continue this run." }, { status: 409 });
-  return Response.json(run);
 }

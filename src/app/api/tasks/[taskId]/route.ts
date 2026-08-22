@@ -1,7 +1,8 @@
 import { publishComment, reconcileTaskStatus } from "@/lib/server/github";
-import { addTaskComment, completeTaskByHuman, getProject, getTask, updateTask, updateTaskIssue } from "@/lib/server/repository";
+import { addTaskComment, claimIdempotencyKey, completeIdempotencyKey, completeTaskByHuman, getProject, getTask, updateTask, updateTaskIssue } from "@/lib/server/repository";
 import { parseEstimatedCostCents } from "@/lib/server/cost";
-import type { Project, Task, TaskStatus } from "@/lib/domain";
+import { BOARD_COLUMNS, type Project, type Task, type TaskStatus } from "@/lib/domain";
+import { API_LIMITS, apiError, apiErrorFrom, apiResponse, assertAllowedKeys, getIdempotencyKey, idempotencyResponse, optionalEnum, optionalInteger, optionalNonEmptyString, optionalString, parseJsonBody, requestFingerprint, validateIdentifier } from "@/lib/server/api";
 
 type SyncableTask = Pick<Task, "id" | "issueNumber" | "title" | "description" | "githubUrl">;
 
@@ -12,42 +13,64 @@ async function syncTaskStatus(project: Project, task: SyncableTask, status: Task
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ taskId: string }> }) {
-  const { taskId } = await params;
-  const body = await request.json() as { status?: "inbox" | "ready" | "in_progress" | "agent_review" | "human_review" | "blocked" | "done"; priority?: number; title?: string; description?: string; estimatedCostUsd?: unknown; comment?: string };
-  const estimatedCostCents = body.estimatedCostUsd === undefined ? undefined : parseEstimatedCostCents(body.estimatedCostUsd);
-  if (estimatedCostCents === null) return Response.json({ error: "Estimated cost must be a non-negative USD amount." }, { status: 400 });
-  if (body.comment?.trim()) {
+  try {
+    const { taskId: rawTaskId } = await params;
+    const taskId = validateIdentifier(rawTaskId, "taskId");
+    const body = await parseJsonBody(request);
+    assertAllowedKeys(body, ["status", "priority", "title", "description", "estimatedCostUsd", "comment"]);
     const task = getTask(taskId);
     const project = task ? getProject(task.projectId) : null;
-    if (!task || !project) return Response.json({ error: "Task not found." }, { status: 404 });
-    if (process.env.EXECUTION_MODE === "live" && task.issueNumber) {
-      try { await publishComment(project.fullName, task.issueNumber, body.comment.trim()); }
-      catch (error) { return Response.json({ error: error instanceof Error ? error.message : "GitHub comment failed." }, { status: 502 }); }
+    if (!task || !project) return apiError("TASK_NOT_FOUND", "Task not found.", 404);
+    const status = optionalEnum(body, "status", BOARD_COLUMNS.map((column) => column.id));
+    const priority = optionalInteger(body, "priority", 1, 4);
+    const title = optionalNonEmptyString(body, "title", API_LIMITS.taskTitle);
+    const description = optionalString(body, "description", API_LIMITS.taskDescription);
+    const comment = optionalNonEmptyString(body, "comment", API_LIMITS.comment);
+    const estimatedCostCents = body.estimatedCostUsd === undefined ? undefined : parseEstimatedCostCents(body.estimatedCostUsd);
+    if (estimatedCostCents === null || (estimatedCostCents !== undefined && estimatedCostCents > API_LIMITS.estimatedCostCents)) {
+      return apiError("INVALID_COST", "Estimated cost must be a non-negative USD amount within the supported limit.", 400, { field: "estimatedCostUsd" });
     }
-    return Response.json(addTaskComment(taskId, body.comment.trim()));
-  }
-  if (body.status === "done") {
-    const currentTask = getTask(taskId);
-    const currentProject = currentTask ? getProject(currentTask.projectId) : null;
-    if (!currentTask || !currentProject) return Response.json({ error: "Task not found." }, { status: 404 });
-    let remote;
-    if (process.env.EXECUTION_MODE === "live") {
-      try { remote = await syncTaskStatus(currentProject, currentTask, body.status); }
-      catch (error) { return Response.json({ error: error instanceof Error ? error.message : "GitHub status synchronization failed." }, { status: 502 }); }
+    const remoteMutation = Boolean(comment || status);
+    if (comment && (status || priority !== undefined || title !== undefined || description !== undefined || estimatedCostCents !== undefined)) {
+      return apiError("VALIDATION_ERROR", "A comment cannot be combined with another task mutation.", 400);
     }
-    const task = completeTaskByHuman(taskId);
-    return task ? Response.json({ ...task, remoteSync: remote ?? null }) : Response.json({ error: "Task not found." }, { status: 404 });
-  }
-  let remote;
-  if (body.status) {
-    const currentTask = getTask(taskId);
-    const currentProject = currentTask ? getProject(currentTask.projectId) : null;
-    if (!currentTask || !currentProject) return Response.json({ error: "Task not found." }, { status: 404 });
-    if (process.env.EXECUTION_MODE === "live") {
-      try { remote = await syncTaskStatus(currentProject, currentTask, body.status); }
-      catch (error) { return Response.json({ error: error instanceof Error ? error.message : "GitHub status synchronization failed." }, { status: 502 }); }
+    if (!comment && status === undefined && priority === undefined && title === undefined && description === undefined && estimatedCostCents === undefined) {
+      return apiError("VALIDATION_ERROR", "At least one task field is required.", 400);
     }
+    if (!remoteMutation) {
+      const updated = updateTask(taskId, { status, priority, title, description, estimatedCostCents });
+      return updated ? apiResponse(updated) : apiError("TASK_NOT_FOUND", "Task not found.", 404);
+    }
+
+    const key = getIdempotencyKey(request);
+    const operation = comment ? "task.comment" : "task.status";
+    const fingerprint = requestFingerprint({ taskId, status: status ?? null, comment: comment ?? null });
+    const claim = claimIdempotencyKey(key!, operation, fingerprint);
+    if (claim.kind !== "new") return claim.kind === "replay" ? apiResponse(claim.response, claim.status) : idempotencyResponse(claim);
+    try {
+      if (comment) {
+        if (process.env.EXECUTION_MODE === "live" && task.issueNumber) await publishComment(project.fullName, task.issueNumber, comment);
+        const payload = addTaskComment(taskId, comment);
+        completeIdempotencyKey(key!, operation, fingerprint, payload, 200);
+        return apiResponse(payload);
+      }
+      let remote: Awaited<ReturnType<typeof syncTaskStatus>> | null = null;
+      if (process.env.EXECUTION_MODE === "live") remote = await syncTaskStatus(project, task, status!);
+      const updated = status === "done" ? completeTaskByHuman(taskId) : updateTask(taskId, { status });
+      const payload = updated ? { ...updated, remoteSync: remote } : null;
+      if (!payload) {
+        const errorPayload = { code: "TASK_NOT_FOUND", message: "Task not found." };
+        completeIdempotencyKey(key!, operation, fingerprint, errorPayload, 404);
+        return apiResponse(errorPayload, 404);
+      }
+      completeIdempotencyKey(key!, operation, fingerprint, payload, 200);
+      return apiResponse(payload);
+    } catch {
+      const errorPayload = { code: "REMOTE_MUTATION_FAILED", message: comment ? "Comment could not be published. Check the connection and try again with a new request key." : "Task status could not be synchronized. Check the connection and try again with a new request key." };
+      completeIdempotencyKey(key!, operation, fingerprint, errorPayload, 502);
+      return apiResponse(errorPayload, 502);
+    }
+  } catch (error) {
+    return apiErrorFrom(error, "The task mutation could not be completed.");
   }
-  const task = updateTask(taskId, { status: body.status, priority: body.priority, title: body.title, description: body.description, estimatedCostCents });
-  return task ? Response.json({ ...task, remoteSync: remote ?? null }) : Response.json({ error: "Task not found." }, { status: 404 });
 }
