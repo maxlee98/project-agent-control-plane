@@ -188,7 +188,7 @@ test("creates a PR with one explicit closing canonical Issue reference", async (
     description: "",
     status: "in_progress",
     priority: 3,
-    labels: [],
+    labels: ["bug"],
     assignee: null,
     agentState: "succeeded",
     currentSummary: "Validated implementation.",
@@ -229,6 +229,7 @@ test("creates a PR with one explicit closing canonical Issue reference", async (
   const result = await github.createPullRequest(project().fullName, task, run);
   assert.deepEqual(result, { number: 42, url: "https://github.com/maxlee98/project-agent-control-plane/pull/42" });
   const pullRequest = calls.find((call) => call.url.endsWith("/pulls") && call.method === "POST");
+  assert.equal(pullRequest?.body?.title, "fix: Task #10");
   const pullRequestBody = String(pullRequest?.body?.body);
   assert.match(pullRequestBody, /\bFixes #10\b/);
   assert.equal(pullRequestBody.match(/#10/g)?.length, 1);

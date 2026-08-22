@@ -15,6 +15,11 @@ jobs:
       - name: Check base repository
         uses: actions/checkout@v4
 
+      - name: Validate pull request title
+        run: node scripts/verify-pr-title.mjs
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+
       - name: Validate body against the canonical template
         run: node scripts/verify-pr-template.mjs
         env:

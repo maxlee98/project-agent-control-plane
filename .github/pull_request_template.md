@@ -2,7 +2,10 @@
 
 - **Task:** <!-- Required: link the canonical GitHub Issue/control-plane task with `Fixes #<issue-number>` or `Closes #<issue-number>`. An LLD link or ordinary mention alone is not sufficient. -->
 - **LLD:** <!-- Link `LLD/<task-slug>.md`; explain if this is a docs-only exception. -->
-- **PR type:** <!-- Feature / bug fix / refactor / docs / test / configuration / migration -->
+- **PR type:** <!-- Match the title prefix: feat / fix / docs / refactor / test / chore / perf / build / ci / revert -->
+
+Pull request titles must use `<type>: <description>` format, for example `feat: add task filtering`
+or `fix(api): prevent duplicate handoffs`.
 
 ## Problem
 
