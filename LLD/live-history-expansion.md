@@ -130,7 +130,7 @@ introduced.
 - [x] Implementation self-review completed
 - [x] Tests, typecheck, and build passed (isolated DATA_DIR build)
 - [x] Documentation created
-- [ ] Handoff and remote PR verified
+- [x] Handoff and remote PR verified
 
 ## Validation results
 
@@ -147,4 +147,8 @@ introduced.
 
 - Implementation remains local on dedicated branch `agent/20-There-should-be-a-button-to-open-t-5d74ef51`.
 - Canonical Issue #20 verified as open with the matching title and description. PR creation remains
-  pending final branch/commit checks.
+  complete after final branch/commit checks.
+- Commit `c5483de27c5fbfff5498e823c15a37dd530ba572` pushed to
+  `origin/agent/20-There-should-be-a-button-to-open-t-5d74ef51`.
+- PR #57 verified open at https://github.com/maxlee98/project-agent-control-plane/pull/57 with base
+  `main`, the expected feature head, and the required template headings. It contains `Fixes #20`.
