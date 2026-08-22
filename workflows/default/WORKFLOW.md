@@ -76,8 +76,13 @@ You are working on a task selected by the Project Agent Control Plane.
 
 - Every feature, bug fix, refactor, test, documentation, configuration, and migration change must be developed on a dedicated branch and delivered through a pull request.
 - Never commit work directly on `main` and never push directly to `main`.
-- Use `.github/pull_request_template.md` for every PR. Link the control-plane task and its `LLD/<task-slug>.md`.
+- Use `.github/pull_request_template.md` for every PR. Link the control-plane task and its
+  `LLD/<issue-number>-<task-slug>.md`; the Issue number must be verified before the LLD is created.
+  Historical LLDs without a verifiable Issue identity may remain under the documented legacy naming
+  exception.
 - A PR must describe the problem, goals/non-goals, design, affected boundaries, migrations, validation results, security review, risks, and follow-ups.
+- Every PR title must use a supported Conventional Commit-style prefix (`feat:`, `fix:`, `docs:`,
+  `refactor:`, `test:`, `chore:`, `perf:`, `build:`, `ci:`, or `revert:`) followed by a description.
 - Before a remote write, verify local status, diff whitespace, commit SHA, branch, and relevant checks. Query remote state before retrying an interrupted push or PR operation.
 - Local commits are not a completed handoff until the dedicated branch and PR are verified remotely.
 

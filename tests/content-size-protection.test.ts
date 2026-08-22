@@ -4,7 +4,7 @@ import { test } from "node:test";
 
 const skillPath = ".agents/skills/content-size-protection/SKILL.md";
 const installerPath = "scripts/install-content-size-protection.mjs";
-const lldPath = "LLD/content-size-protection.md";
+const lldPath = "LLD/37-content-size-protection.md";
 const workflowPath = "workflows/default/WORKFLOW.md";
 const docsPath = "docs/terminal-reliability.md";
 

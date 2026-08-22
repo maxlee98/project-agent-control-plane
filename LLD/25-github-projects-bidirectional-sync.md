@@ -5,7 +5,7 @@
 - **Status:** Implemented; pending human review and merge
 - **Owner:** Project Agent Control Plane
 - **Date:** 2026-08-20
-- **Related task or issue:** Repair Projects V2 sync and keep dashboard tasks, repository Issues, and Project items aligned.
+- **Related task or issue:** [Issue #25](https://github.com/maxlee98/project-agent-control-plane/issues/25) — Repair Projects V2 sync and keep dashboard tasks, repository Issues, and Project items aligned.
 
 ## Problem and observed evidence
 

@@ -6,7 +6,9 @@ documentation change, or agent-harness change in this repository.
 ## Mandatory phase gates
 
 1. **Intake:** identify the repository, user-visible outcome, constraints, acceptance criteria, and non-goals.
-2. **Design:** create or update `LLD/<task-slug>.md` before implementation.
+2. **Design:** verify the canonical GitHub Issue, then create or update
+   `LLD/<issue-number>-<task-slug>.md` before implementation. Do not use a PR number, local task ID,
+   branch name, or commit hash as the filename prefix.
 3. **Implementation:** reread the LLD before editing and update it when scope or decisions change.
 4. **Verification:** run bounded checks through `npm run safe:run` and record actual results.
 5. **Handoff:** summarize files, checks, warnings, branch, PR, and remaining human decisions.
@@ -31,5 +33,8 @@ security, and repository/framework conventions. Fix findings or record them as L
   changes that policy.
 - If a task has no canonical Issue identity, stop before PR creation and resolve the task linkage;
   never substitute a local task ID or invent an Issue number.
+- New Issue-backed LLDs MUST use the exact lowercase kebab-case filename pattern
+  `LLD/<issue-number>-<task-slug>.md`. Verify the Issue before creating the file. Historical LLDs
+  without a verifiable Issue identity may remain under an explicitly documented legacy filename.
 - Never merge automatically; a human reviewer owns approval and merge.
 - Treat missing or interrupted command output as unknown and inspect state before retrying.

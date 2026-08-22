@@ -6,6 +6,7 @@
 - **Owner:** Project Agent Control Plane
 - **Date:** 2026-08-19
 - **Related task:** `task-d86af9b1-d0bc-45af-b0d6-2858b37dc898`
+- **Related GitHub Issue:** [Issue #10](https://github.com/maxlee98/project-agent-control-plane/issues/10)
 - **Related project:** `project-25b20695-f8eb-49d3-ad9c-7ce6e7655f29` (`maxlee98/project-agent-control-plane`)
 
 ## Problem
@@ -97,7 +98,7 @@ done + idle -- human PATCH status=done --> done + idle (no duplicate completion 
 
 ## Affected files and boundaries
 
-- `LLD/clear-stale-agent-state-on-human-done.md`: durable design and validation record.
+- `LLD/10-clear-stale-agent-state-on-human-done.md`: durable design and validation record.
 - `src/app/api/tasks/[taskId]/route.ts`: identify human status transition source if needed.
 - `src/lib/server/repository.ts`: implement atomic Done transition and idempotent completion activity.
 - `tests/done-task-transition.test.ts` or the existing isolated repository test file: regression cases.
