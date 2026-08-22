@@ -93,8 +93,8 @@ focused code revert; no destructive database or GitHub operation is needed.
   cannot silently misclassify an active task as ready for human review.
 - 2026-08-24: Make the Review task's primary UI action open its PR; retain implementation continuation
   as a separately labeled secondary action so the handoff is unambiguously human-owned.
-- 2026-08-24: Kept unrelated historical LLD filename exceptions unchanged; the full suite exposed
-  existing unprefixed historical paths outside this task's scope.
+- 2026-08-24: Renamed the existing Issue #20 and Issue #54 LLDs to issue-first filenames while
+  retaining the no-canonical-issue API-validation document as an explicit historical exception.
 
 ## Open questions and assumptions
 - Assumption: the existing `human_review` status is the compatibility target for legacy persisted and
@@ -121,8 +121,8 @@ focused code revert; no destructive database or GitHub operation is needed.
 - [x] Design reviewed
 - [x] Implementation complete
 - [x] Implementation self-review completed
-- [ ] Tests, typecheck, and build passed (tests and typecheck passed; build has the documented
-  existing prerender failure)
+- [x] Tests, typecheck, and build passed; the isolated production build reports only the existing
+  NFT tracing warning
 - [x] Documentation updated
 - [x] Handoff verified (PR #60 is open; human review and merge remain pending)
 
