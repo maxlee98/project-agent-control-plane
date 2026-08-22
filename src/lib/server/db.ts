@@ -73,6 +73,7 @@ function createDatabase() {
       checks_json TEXT NOT NULL DEFAULT '[]',
       provider_id TEXT NOT NULL DEFAULT '',
       model_id TEXT NOT NULL DEFAULT '',
+      reasoning_effort TEXT,
       input_tokens INTEGER NOT NULL DEFAULT 0,
       output_tokens INTEGER NOT NULL DEFAULT 0,
       cache_read_tokens INTEGER NOT NULL DEFAULT 0,
@@ -113,6 +114,7 @@ function createDatabase() {
   if (!existingColumns.has("checks_json")) database.exec("ALTER TABLE runs ADD COLUMN checks_json TEXT NOT NULL DEFAULT '[]'");
   if (!existingColumns.has("provider_id")) database.exec("ALTER TABLE runs ADD COLUMN provider_id TEXT NOT NULL DEFAULT ''");
   if (!existingColumns.has("model_id")) database.exec("ALTER TABLE runs ADD COLUMN model_id TEXT NOT NULL DEFAULT ''");
+  if (!existingColumns.has("reasoning_effort")) database.exec("ALTER TABLE runs ADD COLUMN reasoning_effort TEXT");
   if (!existingColumns.has("input_tokens")) database.exec("ALTER TABLE runs ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0");
   if (!existingColumns.has("output_tokens")) database.exec("ALTER TABLE runs ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0");
   if (!existingColumns.has("cache_read_tokens")) database.exec("ALTER TABLE runs ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0");

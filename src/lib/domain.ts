@@ -15,6 +15,18 @@ export type ExecutionMode = "demo" | "live";
 export type ActivityTone = "cyan" | "amber" | "violet" | "rose" | "red" | "green" | "slate";
 export type RunCostSource = "pending" | "sdk" | "catalog" | "unavailable";
 export type TaskCostStatus = "not_started" | "pending" | "available" | "partial" | "unavailable";
+export const REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+
+export interface ReasoningCapability {
+  providerId: string;
+  modelId: string;
+  supportedEfforts: ReasoningEffort[];
+}
+
+export function isReasoningEffort(value: unknown): value is ReasoningEffort {
+  return typeof value === "string" && (REASONING_EFFORTS as readonly string[]).includes(value);
+}
 
 /** Stable vocabulary exposed by the control plane, not by an agent implementation. */
 export type RunEventType =
@@ -162,6 +174,7 @@ export interface AgentRun {
   executionMode: ExecutionMode;
   providerId: string;
   modelId: string;
+  reasoningEffort: ReasoningEffort | null;
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
@@ -205,6 +218,7 @@ export interface DashboardData {
     executionMode: ExecutionMode;
     liveReady: boolean;
     reason: string | null;
+    reasoning: ReasoningCapability;
   };
 }
 

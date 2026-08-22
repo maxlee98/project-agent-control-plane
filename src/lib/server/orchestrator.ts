@@ -152,7 +152,7 @@ export async function executeLiveRun(runId: string, taskId: string, sourceRunId?
     const prompt = await buildPrompt(expandHome(project.localPath), task);
     assertRunNotStopped(runId);
     enterStage("cline", "Starting the Cline session and executing the task turn.");
-    const result = await dependencies.runCline({ runId, task, project, prompt, workspacePath: workspace.workspacePath, providerId: run.providerId, modelId: run.modelId }, {
+    const result = await dependencies.runCline({ runId, task, project, prompt, workspacePath: workspace.workspacePath, providerId: run.providerId, modelId: run.modelId, reasoningEffort: run.reasoningEffort }, {
       onActivity: (message, detail) => { const safeMessage = redactSecrets(message) ?? "Cline activity"; updateRun(runId, { progress: Math.min(68, 15 + Math.floor(Math.random() * 30)), currentActivity: safeMessage }); void checkpoints?.checkpoint({ phase: "progress" }); },
       onEvent: (event) => persistRunEvent(runId, event),
       onUsage: (usage) => persistRunUsage(runId, usage),
@@ -245,7 +245,7 @@ function schedule(runId: string, taskId: string, mode: AgentRun["mode"]) {
   activeRuns.set(runId, timers);
 }
 
-export function startAgentRun(taskId: string, mode: AgentRun["mode"] = "start", sourceRunId?: string) {
+export function startAgentRun(taskId: string, mode: AgentRun["mode"] = "start", sourceRunId?: string, reasoningEffort?: AgentRun["reasoningEffort"]) {
   const task = getTask(taskId);
   if (!task) return null;
   if (task.agentState === "running") return { error: "This task already has an active run." } as const;
@@ -253,7 +253,8 @@ export function startAgentRun(taskId: string, mode: AgentRun["mode"] = "start", 
     const prerequisiteError = livePrerequisiteError();
     if (prerequisiteError) return { error: prerequisiteError } as const;
   }
-  const run = createRun({ taskId, mode });
+  const sourceRun = sourceRunId ? getRun(sourceRunId) : null;
+  const run = createRun({ taskId, mode, reasoningEffort: reasoningEffort === undefined ? sourceRun?.reasoningEffort ?? null : reasoningEffort });
   if (!run) return null;
   if (run.executionMode === "live") void executeLiveRun(run.id, taskId, sourceRunId);
   else schedule(run.id, taskId, mode);

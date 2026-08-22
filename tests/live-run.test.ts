@@ -61,7 +61,7 @@ const usage: RunUsageSnapshot = {
   costSource: "sdk",
 };
 
-function makeClineInput(runId: string): AgentRunInput & { runId: string; providerId: string; modelId: string } {
+function makeClineInput(runId: string, reasoningEffort?: "high"): AgentRunInput & { runId: string; providerId: string; modelId: string } {
   return {
     runId,
     task: {} as Task,
@@ -70,6 +70,7 @@ function makeClineInput(runId: string): AgentRunInput & { runId: string; provide
     workspacePath: "/tmp/fake-live-workspace",
     providerId: "openrouter",
     modelId: "test-model",
+    reasoningEffort,
   };
 }
 
@@ -120,7 +121,7 @@ function fakeClineCore(finishReason: "completed" | "max_iterations" = "completed
   };
   return {
     core: core as unknown as ClineCore,
-    get startedInput() { return startedInput as { prompt?: string }; },
+    get startedInput() { return startedInput as { prompt?: string; config?: { reasoningEffort?: string } }; },
     get activeDuringSend() { return activeDuringSend; },
     get disposed() { return disposed; },
     get stopped() { return stopped; },
@@ -151,6 +152,16 @@ test("starts a session before sending the task turn and uses the returned result
   assert.equal(hasActiveClineSession("cline-unit"), false);
   assert.equal(fake.disposed, true);
   assert.equal(fake.stopped, false);
+});
+
+test("passes an explicit reasoning effort to ClineCore and omits it for the default", async () => {
+  const explicit = fakeClineCore();
+  await runCline(makeClineInput("cline-explicit-effort", "high"), { onActivity: () => undefined, onEvent: () => undefined }, { createCore: async () => explicit.core });
+  assert.equal(explicit.startedInput.config?.reasoningEffort, "high");
+
+  const defaultRun = fakeClineCore();
+  await runCline(makeClineInput("cline-default-effort"), { onActivity: () => undefined, onEvent: () => undefined }, { createCore: async () => defaultRun.core });
+  assert.equal(Object.prototype.hasOwnProperty.call(defaultRun.startedInput.config ?? {}, "reasoningEffort"), false);
 });
 
 test("ignores terminal events from another Cline session", async () => {
