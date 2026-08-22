@@ -89,7 +89,7 @@ PR title -> validate conventional format -> pass policy gate or fail with action
 - `.github/workflows/validate-pr-template.yml` — validate event PR titles.
 - `.github/pull_request_template.md`, `README.md`, `workflows/default/WORKFLOW.md` — document format.
 - `tests/pr-title.test.ts`, `tests/github-status-sync.test.ts` — regression coverage.
-- `LLD/standardize-pr-title-prefixes.md` — design and validation record.
+- `LLD/54-standardize-pull-request-title-prefixes.md` — design and validation record.
 
 ## Risks, edge cases, and rollback
 

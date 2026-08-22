@@ -89,6 +89,12 @@ focused code revert; no destructive database or GitHub operation is needed.
 - 2026-08-24: Keep `human_review` as the stable internal status and normalize legacy values at read
   boundaries instead of performing a destructive migration.
 - 2026-08-24: Prefer exact Project option `Review` while retaining legacy aliases for compatibility.
+- 2026-08-24: Removed `In Progress` from the human-review outbound aliases so a missing `Review` option
+  cannot silently misclassify an active task as ready for human review.
+- 2026-08-24: Make the Review task's primary UI action open its PR; retain implementation continuation
+  as a separately labeled secondary action so the handoff is unambiguously human-owned.
+- 2026-08-24: Kept unrelated historical LLD filename exceptions unchanged; the full suite exposed
+  existing unprefixed historical paths outside this task's scope.
 
 ## Open questions and assumptions
 - Assumption: the existing `human_review` status is the compatibility target for legacy persisted and
@@ -101,12 +107,13 @@ focused code revert; no destructive database or GitHub operation is needed.
 - `npm install` — passed; installed dependencies. npm reported 20 audit findings and Node 23 engine
   warnings for transitive packages.
 - `npm run typecheck` — passed.
-- `npm test` — 79 tests passed, 0 failures after the current `main` merge. The test suite still emits
+- `npm test` — 88 tests passed, 0 failures after the current `main` merge and status/UI regression fixes. The test suite still emits
   existing Node experimental/module-type warnings.
 - `npm run safe:run -- --timeout-ms 120000 -- git diff --check` — passed.
-- `npm run build` — failed after successful compilation/typecheck during Next.js prerendering of
-  `/_global-error` with `TypeError: Cannot read properties of null (reading 'useContext')`; the build
-  also reports existing NFT tracing and React key warnings.
+- `npm run build` — the initial build failed during parallel page-data collection with a transient
+  SQLite lock in the shared environment; a repeat using an isolated `DATA_DIR` and single build worker
+  passed compilation, typecheck, static generation, and route output. The successful build reports the
+  existing NFT tracing warning.
 - No automated PR-review API or unrelated remote write was added; Live handoff uses the existing
   status reconciliation boundary after PR creation.
 

@@ -129,6 +129,23 @@ test("maps the exact Projects V2 Review option to the human review state", async
   assert.equal(items[0]?.statusOptionId, "option-review");
 });
 
+test("keeps legacy review aliases readable without treating In Progress as Review", async () => {
+  calls.length = 0;
+  issueState = "open";
+  addedIssue = false;
+  projectItemVisibilityDelay = 0;
+
+  statusName = "Agent Review";
+  const legacyItems = await github.listProjectItems(project());
+  assert.equal(legacyItems[0]?.status, "human_review");
+  assert.equal(legacyItems[0]?.statusMapped, true);
+
+  statusName = "In Progress";
+  const activeItems = await github.listProjectItems(project());
+  assert.equal(activeItems[0]?.status, "in_progress");
+  assert.equal(activeItems[0]?.statusMapped, true);
+});
+
 test("updates the Projects V2 option and reopens an issue for a non-Done status", async () => {
   calls.length = 0;
   issueState = "closed";

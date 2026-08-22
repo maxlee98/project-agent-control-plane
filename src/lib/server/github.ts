@@ -93,7 +93,7 @@ const statusOptionAliases: Record<TaskStatus, string[]> = {
   inbox: ["inbox", "backlog", "todo"],
   ready: ["ready", "todo", "backlog"],
   in_progress: ["in_progress", "in progress", "in-progress"],
-  human_review: ["review", "human_review", "human review", "in_review", "in review", "agent_review", "agent review", "in progress"],
+  human_review: ["review", "human_review", "human review", "in_review", "in review", "agent_review", "agent review"],
   blocked: ["blocked", "in progress"],
   done: ["done", "complete", "completed"],
 };
