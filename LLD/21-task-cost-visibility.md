@@ -97,7 +97,7 @@ cost” so neither is confused with the other.
 
 ## Affected files and modules
 
-- `LLD/task-cost-visibility.md` — durable design and validation record.
+- `LLD/21-task-cost-visibility.md` — durable design and validation record.
 - `src/lib/domain.ts` — add the task cost field.
 - `src/lib/server/db.ts` — schema/migration and seed defaults.
 - `src/lib/server/repository.ts` — map, create, and update costs.

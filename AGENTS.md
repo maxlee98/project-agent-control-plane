@@ -87,9 +87,12 @@ strategy force-pushes. A rebased published branch requires an explicit, separate
 
 ## LLD and handoff
 
-Before changing code, read or create `LLD/<task-slug>.md`. On every context resumption, reread the
-LLD before making another design or code decision. Every change is branch-and-PR first; never push
-directly to `main`, and never merge automatically.
+Before changing code, verify the canonical GitHub Issue and read or create
+`LLD/<issue-number>-<task-slug>.md`. On every context resumption, reread the LLD before making
+another design or code decision. Every change is branch-and-PR first; never push directly to `main`,
+and never merge automatically. New Issue-backed LLDs use a positive decimal Issue number followed by
+a lowercase kebab-case task slug. Do not substitute a PR number, local task ID, branch name, or
+commit hash; historical LLDs without a verifiable Issue identity are the only documented exception.
 Every PR must explicitly link one canonical GitHub Issue with `Fixes #<number>` or `Closes #<number>`.
 The closing keyword creates the GitHub Development relationship and closes the Issue when the PR
 merges. The Issue is the sole task item on the Issue-only GitHub Project board; the PR is a linked

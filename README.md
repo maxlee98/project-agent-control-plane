@@ -114,6 +114,11 @@ migrations—must be developed on a dedicated branch and delivered through a pul
 commit or push directly to `main`. Before the first edit, inspect the current branch and create a
 task-scoped branch when needed.
 
+Every Issue-backed design must use the human-readable filename pattern
+`LLD/<issue-number>-<task-slug>.md`, with a verified positive GitHub Issue number and lowercase
+kebab-case task slug. Historical LLDs without a verifiable Issue identity are preserved only as
+documented legacy exceptions; do not substitute a PR number or local task ID.
+
 Every PR must use `.github/pull_request_template.md`, link the control-plane task and its LLD, and
 describe the problem, goals, design, affected boundaries, validation results, security review,
 risks, and follow-ups. Verify local checks and remote branch/PR state before reporting handoff.

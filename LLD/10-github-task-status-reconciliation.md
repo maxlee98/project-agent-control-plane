@@ -6,6 +6,7 @@
 - **Owner:** Project Agent Control Plane
 - **Date:** 2026-08-20
 - **Related task:** Task #10, `task-d86af9b1-d0bc-45af-b0d6-2858b37dc898`
+- **Related GitHub Issue:** [Issue #10](https://github.com/maxlee98/project-agent-control-plane/issues/10)
 - **Related project:** `maxlee98/project-agent-control-plane`
 
 ## Problem
