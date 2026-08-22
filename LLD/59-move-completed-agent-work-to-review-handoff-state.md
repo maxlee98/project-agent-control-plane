@@ -126,10 +126,10 @@ focused code revert; no destructive database or GitHub operation is needed.
 - [x] Documentation updated
 - [x] Handoff verified (PR #60 is open; human review and merge remain pending)
 
-## Handoff
 - Branch: `agent/59-Task-Move-completed-agent-work-to--a81a662b`, pushed and verified fresh against
-  `main` with `ahead=4`, `behind=0`.
-- Commits: `264d3a4` (implementation follow-up) and `0541649` (validation record), on top of the
+  `main` with `ahead=7`, `behind=0` after the final handoff-record update.
+- Commits: `264d3a4` (implementation follow-up), `0541649` (validation record), and `a383bbc`
+  (remote validation note), on top of the
   existing task implementation and current `main` merge.
 - Pull request: [#60](https://github.com/maxlee98/project-agent-control-plane/pull/60), verified open
   with base `main`, head `agent/59-Task-Move-completed-agent-work-to--a81a662b`, validated template,
