@@ -1,7 +1,7 @@
 # LLD: Atomic Run Claims and Concurrency Limits
 
 ## Status
-- Status: Complete; PR handoff pending
+- Status: Complete; PR #62 open for human review
 - Owner: Project Agent Control Plane
 - Date: 2026-08-22
 - Related task or issue: GitHub Issue #48 — https://github.com/maxlee98/project-agent-control-plane/issues/48
@@ -143,7 +143,7 @@ can drop only claim enforcement after backing up local data if necessary.
 - [x] Implementation self-review completed
 - [x] Tests, typecheck, and build passed
 - [x] Documentation updated
-- [ ] Handoff verified
+- [x] Handoff verified
 
 ## Review notes
 
@@ -165,5 +165,7 @@ can drop only claim enforcement after backing up local data if necessary.
 - `git diff --check`: passed before and after the branch refresh.
 - Branch refresh: merge commit `8612059` incorporated current `origin/main`, including the approved
   historical LLD renames, while preserving Issue #48's atomic claim implementation.
-- Remote handoff: pending the required push, freshness verification, PR-template validation, and PR
-  creation through `scripts/create-pr.mjs`.
+- Remote handoff: PR #62 was created and verified open at
+  https://github.com/maxlee98/project-agent-control-plane/pull/62 with base `main`, head
+  `agent/48-Task-Make-run-claims-atomic-and-en-60e35595`, and the required `Fixes #48` linkage. The
+  PR template and CI validation checks passed before this final documentation-only update.
