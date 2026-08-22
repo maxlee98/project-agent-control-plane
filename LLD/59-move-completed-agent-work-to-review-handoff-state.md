@@ -1,0 +1,122 @@
+# LLD: Move Completed Agent Work to the Review Handoff State
+
+## Status
+- Status: Complete; pending human review
+- Owner: Project Agent Control Plane
+- Date: 2026-08-24
+- Related task or issue: GitHub Issue #59
+
+## Problem
+Completed agent runs currently use the local `agent_review` status even though no automated PR
+review has occurred. The dashboard therefore exposes a misleading state and GitHub Projects `Review`
+options are not consistently projected to the local workflow.
+
+## Goals
+- Make `human_review` the only canonical post-agent handoff state and display it as `Review`.
+- Transition successful Demo and Live runs only after their existing completion/PR checkpoints.
+- Map the exact GitHub Projects `Review` option to `human_review`.
+- Keep legacy `agent_review` and `in_review` values readable and normalize them without losing task
+  metadata such as branch or PR URLs.
+- Keep Review actions explicitly human/PR-oriented and preserve failure and stop behavior.
+
+## Non-goals
+- No automated PR reviewer.
+- No change to Done semantics, issue closure, branch/workspace behavior, or PR creation behavior.
+- No destructive migration or remote status rewrite that is not required for synchronization.
+
+## Requirements and acceptance criteria
+- Active runs remain `in_progress`; successful Demo and Live runs end in `human_review`.
+- Live status is updated only after validation, branch publication, and PR creation/update succeed.
+- Failed, stopped, or validation-failing runs do not enter Review.
+- Inbound Project `Review` maps to local `human_review`.
+- Persisted legacy `agent_review` rows are projected as `human_review`; legacy GitHub aliases remain
+  accepted for compatibility.
+- The dashboard says `Review`, not `Agent review` or an automated-review claim.
+- Focused regression coverage protects Demo handoff, Live handoff, inbound mapping, and legacy data.
+
+## Existing architecture
+- `src/lib/domain.ts` defines board columns and `TaskStatus`.
+- `src/lib/server/orchestrator.ts` owns Demo timers and Live validation/git/PR handoff.
+- `src/lib/server/github.ts` normalizes Project status options and syncs Project items.
+- `src/lib/server/repository.ts` maps and persists SQLite task rows.
+- `src/components/ControlPlane.tsx` renders status controls, task actions, and handoff copy.
+- Existing tests isolate the SQLite database and mock Live dependencies.
+
+## Proposed design
+Remove `agent_review` from the canonical board vocabulary while retaining a read-time compatibility
+normalizer. Normalize `agent_review` to `human_review` in repository task mapping and in GitHub inbound
+status mapping. Keep legacy aliases in the outbound status option lookup so existing Projects can be
+reconciled safely, preferring the exact `Review` option. Update both orchestrator completion paths to
+set `human_review`, and update UI options/copy and workflow documentation to use `Review`.
+
+## Data and state transitions
+```text
+Ready -> In Progress -> Review -> Done
+             |             ^
+             +-> Blocked  successful validation + (Live) push/PR
+             +-> stopped/waiting
+```
+
+Demo reaches Review at its existing 100% simulated completion step. Live reaches Review only after
+`commitAndPush` and `createPullRequest` return successfully and the stop guard passes. Optional issue
+comment failure keeps the completed run in Review and records its warning, matching existing behavior.
+
+## Affected files and boundaries
+- `LLD/59-move-completed-agent-work-to-review-handoff-state.md`
+- `src/lib/domain.ts`
+- `src/lib/server/orchestrator.ts`
+- `src/lib/server/github.ts`
+- `src/lib/server/repository.ts`
+- `src/components/ControlPlane.tsx`
+- `src/app/api/tasks/[taskId]/route.ts`
+- `workflows/default/WORKFLOW.md`, `README.md`, and relevant architecture documentation
+- Focused lifecycle/status synchronization tests
+
+## Risks, edge cases, and rollback
+The primary risk is treating a legacy Project option or database value as unknown and losing its
+task association. Read-time normalization is additive and preserves branch/PR fields. Outbound
+status lookup accepts legacy aliases, and unknown options continue to fail explicitly. Rollback is a
+focused code revert; no destructive database or GitHub operation is needed.
+
+## Validation plan
+1. Run focused status/domain, Demo lifecycle, Live lifecycle, and GitHub synchronization tests.
+2. Run the complete test suite and typecheck.
+3. Run the production build with an isolated data directory if required by the environment.
+4. Inspect diff/whitespace and verify no automated PR-review API or unintended remote write exists.
+
+## Decision log
+- 2026-08-24: Verified canonical GitHub Issue #59 and current feature branch before editing.
+- 2026-08-24: Keep `human_review` as the stable internal status and normalize legacy values at read
+  boundaries instead of performing a destructive migration.
+- 2026-08-24: Prefer exact Project option `Review` while retaining legacy aliases for compatibility.
+
+## Open questions and assumptions
+- Assumption: the existing `human_review` status is the compatibility target for legacy persisted and
+  remote values.
+- Future automated review, if added, should have a distinct status/result rather than reusing this
+  human handoff state.
+- Review-task continuation remains available but must not be described as automated PR review.
+
+## Validation results
+- `npm install` — passed; installed dependencies. npm reported 20 audit findings and Node 23 engine
+  warnings for transitive packages.
+- `npm run typecheck` — passed.
+- `npm test` — 77 passed, 2 failed in the pre-existing `tests/lld-naming.test.ts` checks for the
+  historical undocumented filenames `LLD/live-history-expansion.md` and
+  `LLD/standardize-pr-title-prefixes.md`; all task-status, GitHub synchronization, Live handoff, and
+  legacy compatibility tests passed.
+- `npm run safe:run -- --timeout-ms 120000 -- git diff --check` — passed.
+- `npm run build` — failed after successful compilation/typecheck during Next.js prerendering of
+  `/_global-error` with `TypeError: Cannot read properties of null (reading 'useContext')`; the build
+  also reports existing NFT tracing and React key warnings.
+- No automated PR-review API or unrelated remote write was added; Live handoff uses the existing
+  status reconciliation boundary after PR creation.
+
+## Completion checklist
+- [x] Design reviewed
+- [x] Implementation complete
+- [x] Implementation self-review completed
+- [ ] Tests, typecheck, and build passed (focused tests and typecheck passed; full suite has the
+  documented pre-existing LLD naming failures; build has the documented prerender failure)
+- [x] Documentation updated
+- [ ] Handoff verified (branch/PR publication remains for the final handoff)

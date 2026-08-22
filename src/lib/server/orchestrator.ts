@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { addActivity, addRunEvent, createRun, getProject, getRun, getTask, updateRun, updateTask } from "./repository";
-import { createPullRequest, publishComment } from "./github";
+import { createPullRequest, publishComment, reconcileTaskStatus } from "./github";
 import { runCline, stopClineRun } from "./cline";
 import { IssueCheckpointPublisher } from "./issue-checkpoints";
 import type { RunUsageSnapshot } from "./cost";
@@ -54,6 +54,7 @@ export interface LiveRunDependencies {
   runChecks: typeof runChecks;
   commitAndPush: typeof commitAndPush;
   createPullRequest: typeof createPullRequest;
+  reconcileTaskStatus: typeof reconcileTaskStatus;
   publishComment: typeof publishComment;
 }
 
@@ -64,6 +65,7 @@ const liveRunDependencies: LiveRunDependencies = {
   runChecks,
   commitAndPush,
   createPullRequest,
+  reconcileTaskStatus,
   publishComment,
 };
 
@@ -188,7 +190,10 @@ export async function executeLiveRun(runId: string, taskId: string, sourceRunId?
     assertRunNotStopped(runId);
     const pr = await dependencies.createPullRequest(project.fullName, task, { ...handoffRun, commitSha: handoff.sha, branchName: workspace.branchName });
     assertRunNotStopped(runId);
-    updateTask(task.id, { status: "agent_review", agentState: "succeeded", branchName: workspace.branchName, prUrl: pr.url, summary: `Live run completed. ${handoff.changedFiles.length} files changed; PR #${pr.number} is ready for review.` });
+    updateTask(task.id, { branchName: workspace.branchName, prUrl: pr.url, summary: `Live run completed. ${handoff.changedFiles.length} files changed; PR #${pr.number} is ready for human review.` });
+    if (project.githubProjectId) await dependencies.reconcileTaskStatus(project, task, "human_review");
+    assertRunNotStopped(runId);
+    updateTask(task.id, { status: "human_review", agentState: "succeeded", branchName: workspace.branchName, prUrl: pr.url, summary: `Live run completed. ${handoff.changedFiles.length} files changed; PR #${pr.number} is ready for human review.` });
     updateRun(runId, { status: "completed", progress: 100, currentActivity: "Pull request ready for review", finishedAt: new Date().toISOString() });
     addRunEvent(runId, "handoff_complete", "Pull request created", pr.url);
     addActivity({ projectId: project.id, taskId: task.id, runId, type: "pull_request", title: "Live PR ready for review", detail: `${handoff.changedFiles.length} changed files · ${handoff.sha.slice(0, 8)}`, tone: "violet" });
@@ -229,7 +234,7 @@ function schedule(runId: string, taskId: string, mode: AgentRun["mode"]) {
       const event: RunEventDraft = { type: step.type as RunEventType, message: step.message, detail: step.detail, checkpoint: false };
       persistRunEvent(runId, event);
       updateTask(taskId, {
-        status: step.progress === 100 ? "agent_review" : "in_progress",
+        status: step.progress === 100 ? "human_review" : "in_progress",
         agentState: step.progress === 100 ? "succeeded" : "running",
         summary: step.detail,
         branchName,

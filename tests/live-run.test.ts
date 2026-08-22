@@ -226,6 +226,7 @@ function createDependencies(label: string, options: { commentFailure?: boolean; 
     },
     commitAndPush: async () => ({ sha: `commit-${label}`, changedFiles: [`src/${label}.ts`] }),
     createPullRequest: async () => ({ number: 36, url: `https://github.com/example/live-${label}/pull/36` }),
+    reconcileTaskStatus: async () => ({ projectChanged: false, issueChanged: false, issueNumber: 36, githubUrl: `https://github.com/example/live-${label}/issues/36`, issueCreated: false, issueCorrected: false, projectItemAdded: false }),
     publishComment: async () => {
       if (options.commentFailure) throw new Error(`GitHub API 422: token=${secret}`);
     },
@@ -248,7 +249,7 @@ test("completes a mocked live run with persisted state, events, PR identity, and
   assert.equal(completedRun?.inputTokens, usage.inputTokens);
   assert.equal(completedRun?.actualCostUsd, usage.actualCostUsd);
   assert.equal(completedRun?.costSource, "sdk");
-  assert.equal(completedTask?.status, "agent_review");
+  assert.equal(completedTask?.status, "human_review");
   assert.equal(completedTask?.agentState, "succeeded");
   assert.equal(completedTask?.prUrl, "https://github.com/example/live-success/pull/36");
   for (const stage of ["configuration", "workspace", "cline", "validation", "git_handoff", "pull_request", "issue_update"]) {
@@ -272,7 +273,7 @@ test("keeps a completed handoff when the optional Issue comment fails", async ()
   const activity = repository.getDashboard().activity.find((candidate) => candidate.runId === fixture.run.id && candidate.type === "handoff_warning");
 
   assert.equal(run?.status, "completed");
-  assert.equal(task?.status, "agent_review");
+  assert.equal(task?.status, "human_review");
   assert.equal(task?.agentState, "succeeded");
   assert.equal(event?.detail?.includes(secret), false);
   assert.equal(event?.detail?.includes("[REDACTED_SECRET]"), true);

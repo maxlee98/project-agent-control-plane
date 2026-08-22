@@ -35,8 +35,7 @@ function statusFromLabel(value: string | undefined): TaskStatus {
   const normalized = value?.trim().toLowerCase().replace(/[\s-]+/g, "_");
   if (normalized === "ready" || normalized === "todo" || normalized === "backlog") return "ready";
   if (normalized === "in_progress") return "in_progress";
-  if (normalized === "agent_review" || normalized === "in_review") return "agent_review";
-  if (normalized === "human_review") return "human_review";
+  if (normalized === "agent_review" || normalized === "in_review" || normalized === "human_review" || normalized === "review") return "human_review";
   if (normalized === "blocked") return "blocked";
   if (normalized === "done" || normalized === "complete" || normalized === "completed") return "done";
   return "inbox";
@@ -94,8 +93,7 @@ const statusOptionAliases: Record<TaskStatus, string[]> = {
   inbox: ["inbox", "backlog", "todo"],
   ready: ["ready", "todo", "backlog"],
   in_progress: ["in_progress", "in progress", "in-progress"],
-  agent_review: ["agent_review", "agent review", "in_review", "in review", "review", "in progress"],
-  human_review: ["human_review", "human review", "in_review", "in review", "review", "in progress"],
+  human_review: ["review", "human_review", "human review", "in_review", "in review", "agent_review", "agent review", "in progress"],
   blocked: ["blocked", "in progress"],
   done: ["done", "complete", "completed"],
 };
@@ -110,7 +108,8 @@ function issueStateForTaskStatus(status: TaskStatus): "open" | "closed" {
 
 function findStatusOption(item: SyncedProjectItem, status: TaskStatus) {
   const aliases = new Set(statusOptionAliases[status].map(normalizedOptionName));
-  return item.statusOptions.find((option) => aliases.has(normalizedOptionName(option.name))) ?? null;
+  const exact = item.statusOptions.find((option) => normalizedOptionName(option.name) === normalizedOptionName("Review"));
+  return status === "human_review" ? exact ?? item.statusOptions.find((option) => aliases.has(normalizedOptionName(option.name))) ?? null : item.statusOptions.find((option) => aliases.has(normalizedOptionName(option.name))) ?? null;
 }
 
 function isMappedStatusOption(value: string | undefined) {

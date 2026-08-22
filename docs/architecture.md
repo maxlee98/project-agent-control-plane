@@ -67,7 +67,7 @@ When validating a real Live run, keep credentials host-side and use bounded, sep
    that the run emits stage events for workspace, Cline, validation, Git, and PR boundaries, and
    that `isActive` is true only while the current process owns the Cline session.
 4. For success, require persisted `status=completed`, `progress=100`, `commitSha`, changed files,
-   passed checks, a verified PR URL, and task state `agent_review`. An Issue-comment failure after
+   passed checks, a verified PR URL, and task state `human_review` (displayed as `Review`). An Issue-comment failure after
    the PR must appear as a warning without changing those completed states.
 5. For failure or operator stop, require the stage-specific redacted error, preserved workspace
    path, and truthful `failed`/`stopped` state. Query Git and GitHub before retrying any interrupted

@@ -3,7 +3,7 @@ import { db } from "./db";
 import { redactSecrets } from "./redaction";
 import { normalizeLocalPath } from "./paths";
 import { hasActiveClineSession } from "./cline";
-import { normalizeRunEventType } from "../domain";
+import { normalizeRunEventType, normalizeTaskStatus } from "../domain";
 import type { ActivityItem, AgentRun, DashboardData, Project, ReasoningEffort, RunCheck, RunCostSource, RunEvent, RunEventType, Task, TaskCostStatus, TaskStatus } from "../domain";
 import { getReasoningCapabilitySync, validateReasoningEffortSync } from "./reasoning";
 import { isReasoningEffort } from "../domain";
@@ -67,7 +67,7 @@ export function mapTask(row: TaskRow): Task {
     estimatedCostUsd: Number(row.estimated_cost_cents ?? 0) / 100,
     actualCostUsd: actualCostMicros === null ? null : actualCostMicros / 1_000_000,
     actualCostStatus,
-    status: row.status as TaskStatus,
+    status: normalizeTaskStatus(row.status),
     priority: Number(row.priority) as Task["priority"],
     labels: fromJson(row.labels_json),
     assignee: row.assignee === null ? null : (String(row.assignee) as Task["assignee"]),
