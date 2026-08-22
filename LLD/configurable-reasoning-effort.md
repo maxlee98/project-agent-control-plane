@@ -2,7 +2,7 @@
 
 ## Status
 
-- **Status:** In progress; implementation validated locally, PR handoff pending commit and review
+- **Status:** Complete; PR open for human review
 - **Owner:** Project Agent Control Plane
 - **Date:** 2026-08-22
 - **Related task or issue:** [Issue #35](https://github.com/maxlee98/project-agent-control-plane/issues/35) — “Allow configuring reasoning effort per agent run”.
@@ -137,6 +137,10 @@ are never returned by capability endpoints or persisted snapshots.
 - `node scripts/verify-hard-stop.mjs`: passed.
 - Dedicated Cline start-config coverage and repository snapshot integration coverage are now covered
   by the added live-run and task-cost tests.
+- Remote handoff: branch `agent/35-Allow-configuring-reasoning-effort-460f3819` is pushed and fresh
+  against `main` (`ahead=2`, `behind=0`); PR #45 is open at
+  https://github.com/maxlee98/project-agent-control-plane/pull/45 with `Fixes #35`, base `main`, and
+  both remote CI checks passing.
 
 ## Open questions and assumptions
 
@@ -153,4 +157,5 @@ are never returned by capability endpoints or persisted snapshots.
 - [x] Implementation self-review completed
 - [x] Tests and typecheck passed; production build has a pre-existing static-generation failure
 - [x] Documentation updated
-- [ ] Handoff and issue-linked PR verified
+- [x] Handoff and issue-linked PR verified: PR #45 is open and targets `main`; Issue #35 is the
+  canonical closing reference
