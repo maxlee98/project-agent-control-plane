@@ -21,6 +21,15 @@ async function git(cwd: string, args: string[], timeout = 30_000) {
   return execFile("git", ["-C", cwd, ...args], { timeout, maxBuffer: 4 * 1024 * 1024 });
 }
 
+function registeredWorktreePaths(output: string) {
+  return new Set(
+    output
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("worktree "))
+      .map((line) => path.resolve(line.slice("worktree ".length))),
+  );
+}
+
 export interface WorkspaceHandle {
   repositoryPath: string;
   workspacePath: string;
@@ -30,18 +39,21 @@ export interface WorkspaceHandle {
 }
 
 export async function prepareWorkspace(project: Project, task: Task, options: { runId: string; mode: "start" | "continue" | "retry"; continuationWorkspacePath?: string | null }): Promise<WorkspaceHandle> {
-  const repositoryPath = path.resolve(expandHome(project.localPath));
-  const root = path.resolve(expandHome(process.env.WORKSPACE_ROOT ?? path.join(os.homedir(), ".project-agent-control-plane", "workspaces")));
-  await fs.mkdir(root, { recursive: true });
+  const configuredRepositoryPath = path.resolve(expandHome(project.localPath));
+  const repositoryPath = await fs.realpath(configuredRepositoryPath);
+  const configuredRoot = path.resolve(expandHome(process.env.WORKSPACE_ROOT ?? path.join(os.homedir(), ".project-agent-control-plane", "workspaces")));
+  await fs.mkdir(configuredRoot, { recursive: true });
+  const root = await fs.realpath(configuredRoot);
   const rootForProject = path.join(root, safeName(project.fullName));
 
   const repositoryCheck = await git(repositoryPath, ["rev-parse", "--show-toplevel"]);
-  if (path.resolve(repositoryCheck.stdout.trim()) !== repositoryPath) throw new Error(`Configured checkout is not the expected Git repository: ${repositoryPath}`);
+  if (path.resolve(repositoryCheck.stdout.trim()) !== repositoryPath) throw new Error(`Configured checkout is not the expected Git repository: ${configuredRepositoryPath}`);
 
   const worktrees = await git(repositoryPath, ["worktree", "list", "--porcelain"]);
+  const registeredPaths = registeredWorktreePaths(worktrees.stdout);
   if (options.mode === "continue") {
     const workspacePath = options.continuationWorkspacePath ? path.resolve(options.continuationWorkspacePath) : "";
-    if (!workspacePath || !worktrees.stdout.includes(`worktree ${workspacePath}`)) {
+    if (!workspacePath || !registeredPaths.has(workspacePath)) {
       throw new Error("Continuation workspace is unavailable. Start a retry to create a fresh workspace from the current default branch.");
     }
     const currentBranch = (await git(workspacePath, ["branch", "--show-current"])).stdout.trim();
@@ -50,7 +62,7 @@ export async function prepareWorkspace(project: Project, task: Task, options: { 
 
   const workspacePath = path.join(rootForProject, safeName(task.id), safeName(options.runId));
   const branchName = `agent/${task.issueNumber ?? task.id}-${safeName(task.title).slice(0, 34)}-${safeName(options.runId).slice(-8)}`;
-  if (worktrees.stdout.includes(`worktree ${workspacePath}`)) throw new Error(`Fresh run workspace already exists: ${workspacePath}`);
+  if (registeredPaths.has(workspacePath)) throw new Error(`Fresh run workspace already exists: ${workspacePath}`);
   try {
     await fs.access(workspacePath);
     throw new Error(`Fresh run workspace path already exists outside Git worktree tracking: ${workspacePath}`);
