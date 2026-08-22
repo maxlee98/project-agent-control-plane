@@ -1,5 +1,5 @@
 import { startAgentRun } from "@/lib/server/orchestrator";
-import { claimIdempotencyKey, completeIdempotencyKey, getRun } from "@/lib/server/repository";
+import { claimIdempotencyKey, completeIdempotencyKey, getRun, isRunClaimError } from "@/lib/server/repository";
 import { isReasoningEffort, type ReasoningEffort } from "@/lib/domain";
 import { apiError, apiErrorFrom, apiResponse, assertAllowedKeys, getIdempotencyKey, idempotencyResponse, parseJsonBody, requestFingerprint, validateIdentifier } from "@/lib/server/api";
 
@@ -23,7 +23,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ run
     let run;
     try {
       run = startAgentRun(sourceRun.taskId, "continue", runId, reasoningEffort as ReasoningEffort | null | undefined);
-    } catch {
+    } catch (error) {
+      if (isRunClaimError(error)) {
+        const payload = { code: error.code, message: error.message };
+        completeIdempotencyKey(key!, operation, fingerprint, payload, error.statusCode);
+        return apiResponse(payload, error.statusCode);
+      }
       const payload = { code: "REASONING_UNSUPPORTED", message: "The selected reasoning effort is not supported by the configured model." };
       completeIdempotencyKey(key!, operation, fingerprint, payload, 400);
       return apiResponse(payload, 400);

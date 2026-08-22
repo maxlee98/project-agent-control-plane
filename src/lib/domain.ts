@@ -226,6 +226,11 @@ export interface DashboardData {
     liveReady: boolean;
     reason: string | null;
     reasoning: ReasoningCapability;
+    capacity: {
+      active: number;
+      globalLimit: number;
+      perProjectLimit: number;
+    };
   };
 }
 
