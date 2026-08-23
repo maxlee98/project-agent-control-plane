@@ -123,5 +123,5 @@ call; no destructive migration is required.
 ## Handoff status
 The implementation is on the dedicated feature branch with PR #69 open for human review:
 https://github.com/maxlee98/project-agent-control-plane/pull/69. The branch was verified fresh against
-`main` (`ahead=3`, `behind=0`) before PR creation. No automatic merge was performed. The existing NFT
+`main` (`ahead=4`, `behind=0`) before the PR update. No automatic merge was performed. The existing NFT
 tracing warning remains a human-review warning.
