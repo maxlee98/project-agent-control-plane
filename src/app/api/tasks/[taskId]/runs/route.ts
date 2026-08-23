@@ -1,6 +1,8 @@
 import { startAgentRun } from "@/lib/server/orchestrator";
 import { claimIdempotencyKey, completeIdempotencyKey, getTask, isRunClaimError } from "@/lib/server/repository";
 import { isReasoningEffort, type ReasoningEffort } from "@/lib/domain";
+import { checkLiveReadiness } from "@/lib/server/readiness";
+import { getProject } from "@/lib/server/repository";
 import { apiError, apiErrorFrom, apiResponse, assertAllowedKeys, getIdempotencyKey, idempotencyResponse, optionalEnum, parseJsonBody, requestFingerprint, validateIdentifier } from "@/lib/server/api";
 
 export async function POST(request: Request, { params }: { params: Promise<{ taskId: string }> }) {
@@ -15,6 +17,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ tas
       return apiError("INVALID_ENUM", "reasoningEffort must be one of the supported effort values.", 400, { field: "reasoningEffort" });
     }
     if (!getTask(taskId)) return apiError("TASK_NOT_FOUND", "Task not found.", 404);
+    if (process.env.EXECUTION_MODE === "live") {
+      const task = getTask(taskId);
+      const project = task ? getProject(task.projectId) : null;
+      if (!project) return apiError("PROJECT_NOT_FOUND", "Project not found.", 404);
+      const readiness = await checkLiveReadiness(project);
+      if (readiness.failure) return apiError("READINESS_BLOCKED", readiness.failure, 409);
+    }
     const key = getIdempotencyKey(request);
     const operation = `run.${mode}`;
     const fingerprint = requestFingerprint({ taskId, mode, reasoningEffort: reasoningEffort || null });

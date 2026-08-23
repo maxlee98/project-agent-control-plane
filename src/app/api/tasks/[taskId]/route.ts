@@ -3,6 +3,7 @@ import { addTaskComment, claimIdempotencyKey, completeIdempotencyKey, completeTa
 import { parseEstimatedCostCents } from "@/lib/server/cost";
 import { API_LIMITS, apiError, apiErrorFrom, apiResponse, assertAllowedKeys, getIdempotencyKey, idempotencyResponse, optionalEnum, optionalInteger, optionalNonEmptyString, optionalString, parseJsonBody, requestFingerprint, validateIdentifier } from "@/lib/server/api";
 import { BOARD_COLUMNS, normalizeTaskStatus, type Project, type Task, type TaskPriority, type TaskStatus } from "@/lib/domain";
+import { checkLiveReadiness } from "@/lib/server/readiness";
 
 type SyncableTask = Pick<Task, "id" | "issueNumber" | "title" | "description" | "githubUrl" | "priority">;
 
@@ -32,6 +33,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ta
     const remoteMutation = Boolean(comment || status || priority !== undefined);
     if (comment && (status || priority !== undefined || title !== undefined || description !== undefined || estimatedCostCents !== undefined)) return apiError("VALIDATION_ERROR", "A comment cannot be combined with another task mutation.", 400);
     if (!comment && status === undefined && priority === undefined && title === undefined && description === undefined && estimatedCostCents === undefined) return apiError("VALIDATION_ERROR", "At least one task field is required.", 400);
+    if (process.env.EXECUTION_MODE === "live" && status !== undefined) {
+      const readiness = await checkLiveReadiness(project);
+      if (readiness.failure) return apiError("READINESS_BLOCKED", readiness.failure, 409);
+    }
     if (!remoteMutation) {
       const updated = updateTask(taskId, { status, priority, title, description, estimatedCostCents });
       return updated ? apiResponse(updated) : apiError("TASK_NOT_FOUND", "Task not found.", 404);
