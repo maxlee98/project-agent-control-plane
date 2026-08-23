@@ -130,7 +130,7 @@ call; no destructive migration is required.
   filesystem access in the workspace/orchestrator route.
 
 ## Handoff status
-The implementation is on the dedicated feature branch with PR #69 open for human review:
+The reconciled implementation is published on the dedicated PR #69 feature head for human review:
 https://github.com/maxlee98/project-agent-control-plane/pull/69. The branch was verified fresh against
-`main` (`ahead=5`, `behind=0`) before the PR update. No automatic merge was performed. The existing NFT
-tracing warning remains a human-review warning.
+`main` (`ahead=10`, `behind=0`) after reconciling current `main`. No automatic merge was performed. The
+existing Turbopack NFT tracing warning remains a human-review warning.
