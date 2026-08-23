@@ -1,4 +1,5 @@
-import { DEFAULT_TASK_PRIORITY, priorityFromLabel, priorityLabel, type AgentRun, type Project, type Task, type TaskPriority, type TaskStatus } from "../domain";
+import { DEFAULT_TASK_PRIORITY, PRIORITY_LABELS, priorityFromLabel, priorityLabel, TASK_PRIORITIES, type AgentRun, type Project, type Task, type TaskPriority, type TaskStatus } from "../domain";
+import type { ProjectPriorityMapping, ProjectStatusConcept, ProjectStatusMapping } from "../domain";
 import { normalizePrTitle } from "../pr-title";
 import { redactSecrets } from "./redaction";
 
@@ -43,6 +44,30 @@ function statusFromLabel(value: string | undefined): TaskStatus {
 }
 
 type StatusOption = { id: string; name: string };
+
+export interface ProjectStatusCapability {
+  fieldName: string;
+  options: string[];
+  mappings: ProjectStatusMapping[];
+}
+
+export type ProjectCapabilityFieldIssue =
+  | "missing_status_field"
+  | "ambiguous_status_fields"
+  | "missing_priority_field"
+  | "ambiguous_priority_fields"
+  | "invalid_priority_options";
+
+export interface ProjectCapabilities {
+  statusFieldName: string | null;
+  statusOptions: string[];
+  statusMappings: ProjectStatusMapping[];
+  statusFieldIssue: "missing_status_field" | "ambiguous_status_fields" | null;
+  priorityFieldName: string | null;
+  priorityOptions: string[];
+  priorityMappings: ProjectPriorityMapping[];
+  priorityFieldIssue: "missing_priority_field" | "ambiguous_priority_fields" | "invalid_priority_options" | null;
+}
 
 type IssueApiRecord = {
   number?: number;
@@ -101,8 +126,8 @@ type ProjectField = { id: string; name?: string; options?: StatusOption[] };
 function requiredPriorityOptions(field: ProjectField | undefined) {
   if (!field) throw new Error("GitHub Projects V2 has no usable Priority field. Create a single-select Priority field with P0, P1, P2, and P3 options.");
   const options = field.options ?? [];
-  const matches = ["P0", "P1", "P2", "P3"].map((name) => options.filter((option) => option.name.trim().toUpperCase() === name));
-  if (matches.some((values) => values.length !== 1)) throw new Error("GitHub Projects V2 Priority field must contain exactly one option for each of P0, P1, P2, and P3.");
+  const matches = PRIORITY_LABELS.map((name) => options.filter((option) => option.name.trim() === name));
+  if (options.length !== PRIORITY_LABELS.length || matches.some((values) => values.length !== 1)) throw new Error("GitHub Projects V2 Priority field must contain exactly the P0, P1, P2, and P3 options.");
   return matches.map((values) => values[0]!);
 }
 
@@ -115,12 +140,102 @@ const statusOptionAliases: Record<TaskStatus, string[]> = {
   ready: ["ready", "todo", "backlog"],
   in_progress: ["in_progress", "in progress", "in-progress"],
   human_review: ["review", "human_review", "human review", "in_review", "in review", "agent_review", "agent review"],
-  blocked: ["blocked", "in progress"],
+  blocked: ["blocked"],
+  done: ["done", "complete", "completed"],
+};
+
+const readinessStatusAliases: Record<ProjectStatusConcept, string[]> = {
+  ready: ["ready", "todo", "backlog"],
+  in_progress: ["in_progress", "in progress", "in-progress"],
+  review: ["review", "human_review", "human review", "in_review", "in review", "agent_review", "agent review"],
+  blocked: ["blocked"],
   done: ["done", "complete", "completed"],
 };
 
 function normalizedOptionName(value: string) {
   return value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+export function mapCanonicalStatusOptions(options: StatusOption[]): ProjectStatusMapping[] {
+  return (Object.keys(readinessStatusAliases) as ProjectStatusConcept[]).map((concept) => {
+    const aliases = new Set(readinessStatusAliases[concept].map(normalizedOptionName));
+    const candidates = options.filter((option) => aliases.has(normalizedOptionName(option.name)));
+    return {
+      concept,
+      optionId: candidates.length === 1 ? candidates[0].id : null,
+      optionName: candidates.length === 1 ? candidates[0].name : null,
+      state: candidates.length === 1 ? "mapped" : candidates.length === 0 ? "missing" : "ambiguous",
+      candidates: candidates.map((option) => option.name),
+    };
+  });
+}
+
+export function mapCanonicalPriorityOptions(options: StatusOption[]): ProjectPriorityMapping[] {
+  return TASK_PRIORITIES.map((priority) => {
+    const label = PRIORITY_LABELS[priority - 1]!;
+    const candidates = options.filter((option) => priorityFromLabel(option.name) === priority);
+    return {
+      priority,
+      label,
+      optionId: candidates.length === 1 ? candidates[0].id : null,
+      optionName: candidates.length === 1 ? candidates[0].name : null,
+      state: candidates.length === 1 ? "mapped" : candidates.length === 0 ? "missing" : "ambiguous",
+      candidates: candidates.map((option) => option.name),
+    };
+  });
+}
+
+export function hasCanonicalPriorityOptions(options: StatusOption[]) {
+  return options.length === PRIORITY_LABELS.length
+    && PRIORITY_LABELS.every((label) => options.filter((option) => option.name.trim() === label).length === 1);
+}
+
+function priorityFieldIssue(field: ProjectField | undefined): ProjectCapabilities["priorityFieldIssue"] {
+  if (!field) return "missing_priority_field";
+  const options = field.options ?? [];
+  return hasCanonicalPriorityOptions(options) ? null : "invalid_priority_options";
+}
+
+export async function inspectProjectCapabilities(project: Project): Promise<ProjectCapabilities> {
+  if (!project.githubProjectId) throw new Error("GitHub Projects V2 is not configured.");
+  type ProjectData = { node: { __typename: string; fields: { nodes: Array<{ id: string; name?: string; options?: StatusOption[] }> } } | null };
+  const data = await graphql<ProjectData>(`query ProjectCapabilities($id: ID!) {
+    node(id: $id) {
+      __typename
+      ... on ProjectV2 {
+        fields(first: 50) {
+          nodes {
+            __typename
+            ... on ProjectV2SingleSelectField { id name options { id name } }
+          }
+        }
+      }
+    }
+  }`, { id: project.githubProjectId });
+  if (!data.node) throw new Error("GitHub Project was not found or is not accessible.");
+  if (data.node.__typename !== "ProjectV2") throw new Error("GitHub node is not a Projects V2 project.");
+  const statusFields = data.node.fields.nodes.filter((field) => normalizedOptionName(field.name ?? "") === "status");
+  const priorityFields = data.node.fields.nodes.filter((field) => normalizedOptionName(field.name ?? "") === "priority");
+  const statusField = statusFields.length === 1 ? statusFields[0] : undefined;
+  const priorityField = priorityFields.length === 1 ? priorityFields[0] : undefined;
+  const statusOptions = statusField?.options ?? [];
+  const priorityOptions = priorityField?.options ?? [];
+  return {
+    statusFieldName: statusField?.name ?? null,
+    statusOptions: statusOptions.map((option) => option.name),
+    statusMappings: mapCanonicalStatusOptions(statusOptions),
+    statusFieldIssue: statusFields.length === 0 ? "missing_status_field" : statusFields.length > 1 ? "ambiguous_status_fields" : null,
+    priorityFieldName: priorityField?.name ?? null,
+    priorityOptions: priorityOptions.map((option) => option.name),
+    priorityMappings: mapCanonicalPriorityOptions(priorityOptions),
+    priorityFieldIssue: priorityFields.length === 0 ? "missing_priority_field" : priorityFields.length > 1 ? "ambiguous_priority_fields" : priorityFieldIssue(priorityField),
+  };
+}
+
+export async function inspectProjectStatus(project: Project): Promise<ProjectStatusCapability> {
+  const capability = await inspectProjectCapabilities(project);
+  if (capability.statusFieldIssue) throw new Error(capability.statusFieldIssue === "missing_status_field" ? "GitHub Project has no Status field." : "GitHub Project has ambiguous Status fields.");
+  return { fieldName: capability.statusFieldName!, options: capability.statusOptions, mappings: capability.statusMappings };
 }
 
 function issueStateForTaskStatus(status: TaskStatus): "open" | "closed" {
@@ -129,14 +244,17 @@ function issueStateForTaskStatus(status: TaskStatus): "open" | "closed" {
 
 function findStatusOption(item: SyncedProjectItem, status: TaskStatus) {
   const aliases = new Set(statusOptionAliases[status].map(normalizedOptionName));
-  const exact = item.statusOptions.find((option) => normalizedOptionName(option.name) === normalizedOptionName("Review"));
-  return status === "human_review" ? exact ?? item.statusOptions.find((option) => aliases.has(normalizedOptionName(option.name))) ?? null : item.statusOptions.find((option) => aliases.has(normalizedOptionName(option.name))) ?? null;
+  const candidates = item.statusOptions.filter((option) => aliases.has(normalizedOptionName(option.name)));
+  return candidates.length === 1 ? candidates[0] : null;
 }
 
-function isMappedStatusOption(value: string | undefined) {
+function isMappedStatusOption(options: StatusOption[], value: string | undefined) {
   if (!value) return false;
   const normalized = normalizedOptionName(value);
-  return Object.values(statusOptionAliases).some((aliases) => aliases.some((alias) => normalizedOptionName(alias) === normalized));
+  const status = statusFromLabel(value);
+  const aliases = new Set(statusOptionAliases[status].map(normalizedOptionName));
+  return options.filter((option) => aliases.has(normalizedOptionName(option.name))).length === 1
+    && aliases.has(normalized);
 }
 
 export async function listProjectItems(project: Project): Promise<SyncedProjectItem[]> {
@@ -247,7 +365,7 @@ export async function listProjectItems(project: Project): Promise<SyncedProjectI
       statusFieldId: statusField?.id ?? null,
       statusOptionId: statusValue?.optionId ?? statusOption?.id ?? null,
       statusOptionName: statusValue?.name ?? statusOption?.name ?? null,
-      statusMapped: isMappedStatusOption(statusValue?.name ?? statusOption?.name),
+      statusMapped: isMappedStatusOption(statusOptions, statusValue?.name ?? statusOption?.name),
       statusOptions,
       priorityFieldId: resolvedPriorityField.id,
       priorityOptionId: priorityValue?.optionId ?? null,
@@ -376,6 +494,30 @@ export async function createPullRequest(fullName: string, task: Task, run: Agent
   const number = Number(body.number);
   const url = String(body.html_url ?? "");
   if (!Number.isInteger(number) || number <= 0 || !url) throw new Error("GitHub created the pull request but returned incomplete metadata.");
+  return { url, number };
+}
+
+export async function createBaselinePullRequest(fullName: string, branch: string, base: string) {
+  const { owner, repo } = repoParts(fullName);
+  const existing = await findOpenPullRequest(owner, repo, branch, base);
+  if (existing) return existing;
+  const response = await githubRequest(`/repos/${owner}/${repo}/pulls`, {
+    method: "POST",
+    body: JSON.stringify({
+      title: "chore: add control-plane repository baseline",
+      head: branch,
+      base,
+      body: "## Repository readiness baseline\n\nThis pull request adds only the missing control-plane workflow and pull-request template files identified by the approved repository readiness check. Review and merge it manually; no automatic merge was performed.",
+    }),
+  });
+  if (response.status === 422) {
+    const createdByRetry = await findOpenPullRequest(owner, repo, branch, base);
+    if (createdByRetry) return createdByRetry;
+  }
+  const body = await readResponse<PullRequestApiRecord>(response);
+  const number = Number(body.number);
+  const url = String(body.html_url ?? "");
+  if (!Number.isInteger(number) || number <= 0 || !url) throw new Error("GitHub created the baseline pull request but returned incomplete metadata.");
   return { url, number };
 }
 

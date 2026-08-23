@@ -7,6 +7,7 @@ import { formatIssueCheckpoint, IssueCheckpointPublisher } from "./issue-checkpo
 import type { RunUsageSnapshot } from "./cost";
 import { commitAndPush, detectChecks, expandHome, prepareWorkspace, runChecks, type WorkspaceHandle } from "./workspaces";
 import { redactSecrets } from "./redaction";
+import { assessProjectReadiness, liveReadinessFailure } from "./readiness";
 import type { AgentRun, RunEventDraft, RunEventType } from "../domain";
 
 declare global {
@@ -71,6 +72,7 @@ export interface LiveRunDependencies {
   createPullRequest: typeof createPullRequest;
   reconcileTaskStatus: typeof reconcileTaskStatus;
   publishComment: typeof publishComment;
+  assessReadiness?: typeof assessProjectReadiness;
 }
 
 const liveRunDependencies: LiveRunDependencies = {
@@ -82,6 +84,7 @@ const liveRunDependencies: LiveRunDependencies = {
   createPullRequest,
   reconcileTaskStatus,
   publishComment,
+  assessReadiness: assessProjectReadiness,
 };
 
 function safeErrorMessage(error: unknown) {
@@ -196,6 +199,12 @@ export async function executeLiveRun(runId: string, taskId: string, sourceRunId?
     const run = getRun(runId);
     const sourceRun = sourceRunId ? getRun(sourceRunId) : null;
     if (!run) throw new Error("Live run disappeared before workspace preparation.");
+    if (dependencies.assessReadiness) {
+      const readiness = await dependencies.assessReadiness(project);
+      const readinessFailure = liveReadinessFailure(readiness);
+      if (readinessFailure) throw new Error(readinessFailure);
+      addRunEvent(runId, "progress", "Live readiness confirmed", "The repository passed the required preflight checks.");
+    }
     enterStage("workspace", "Preparing an isolated Git worktree.");
     workspace = await dependencies.prepareWorkspace(project, task, { runId, mode: run.mode, continuationWorkspacePath: sourceRun?.workspacePath });
     assertRunNotStopped(runId);
