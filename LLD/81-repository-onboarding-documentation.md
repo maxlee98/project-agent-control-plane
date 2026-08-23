@@ -140,6 +140,8 @@ impact.
   documentation-only scope.
 - `npm run safe:run -- --timeout-ms 30000 -- git diff --cached --check` — passed for the final staged
   documentation diff.
+- `npm run safe:run -- --timeout-ms 30000 -- node scripts/verify-branch-freshness.mjs --base main
+  --head docs/81-repository-onboarding-documentation` — passed; status `ahead`, ahead `3`, behind `0`.
 
 ## Decision log
 
@@ -156,6 +158,6 @@ impact.
 - [x] README onboarding guidance and documentation index added
 - [x] Links and wording reviewed against current implementation
 - [x] Diff check, tests, typecheck, and build passed
-- [ ] Branch freshness verified
+- [x] Branch freshness verified
 - [ ] Template-compliant PR opened and verified
 - [ ] Human merge approval remains pending
