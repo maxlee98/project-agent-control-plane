@@ -122,4 +122,4 @@ snapshot. An empty selection remains `null`/unset at the existing boundary.
 - [x] Regression coverage added
 - [x] Focused tests passed
 - [x] Full tests, typecheck, build, diff check, and hard-stop verification passed
-- [ ] Pull request created and verified for human review
+- [x] Pull request #76 created and verified for human review; Issue #75 remains open pending merge
