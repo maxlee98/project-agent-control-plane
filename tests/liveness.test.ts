@@ -65,6 +65,8 @@ test("normalizes home-relative and absolute checkout paths", () => {
 });
 
 test("migrates the seeded sample to Demo and reconciles duplicate child history", () => {
+  const runColumns = reconciledDatabase.prepare("PRAGMA table_info(runs)").all() as Array<{ name: string }>;
+  assert.deepEqual(runColumns.map((column) => column.name).filter((name) => ["owner_id", "lease_heartbeat_at", "lease_expires_at", "current_stage", "recovery_status", "recovery_reason"].includes(name)), ["owner_id", "lease_heartbeat_at", "lease_expires_at", "current_stage", "recovery_status", "recovery_reason"]);
   const projects = reconciledDatabase.prepare("SELECT id, is_demo FROM projects WHERE local_path = ? OR local_path = ?").all("~/Documents/Repos/project-agent-control-plane", checkoutPath) as Array<{ id: string; is_demo: number }>;
   assert.deepEqual(projects, [{ id: "project-duplicate", is_demo: 0 }]);
   assert.equal(reconciledDatabase.prepare("SELECT project_id FROM tasks WHERE id = ?").get("task-duplicate")?.project_id, "project-duplicate");
