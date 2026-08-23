@@ -39,7 +39,7 @@ Next.js control room
 
 - Node.js 22+
 - Git
-- A local GitHub CLI login (`gh auth login`) for the future GitHub adapter
+- A local GitHub CLI login (`gh auth login`) for GitHub repository operations and diagnostics
 - Cline configuration for real agent runs (optional while using demo mode)
 
 ## Run locally
@@ -106,12 +106,56 @@ Local SQLite migrations, backup/checkpoint, restore, and conservative history-re
 documented in [docs/local-operations.md](docs/local-operations.md). The retention defaults can be
 overridden with the `*_RETENTION_DAYS` variables in `.env.local`.
 
-## Repository setup
+## Repository setup and onboarding
 
-Use the **Add repository** flow to register a checkout and its GitHub Projects V2 board. Each
-managed repository can optionally contain a `WORKFLOW.md` with its own coding conventions,
-validation commands, branch rules, and handoff expectations. A starter contract lives at
-`workflows/default/WORKFLOW.md`.
+Use the **Add repository** flow to register a checkout and, for Live mode, its GitHub Projects V2
+board. The detailed, copyable procedure is in the [repository onboarding checklist](docs/repository-onboarding.md).
+
+The current flow records these values in local SQLite and can optionally run a read-only readiness
+check. Registration and readiness do not clone, install dependencies, create a run worktree, or
+silently modify the target checkout:
+
+1. GitHub `owner/repository` name.
+2. Absolute or `~/` local checkout path.
+3. Projects V2 node ID (`PVT_…`), optional in Demo and required for Live synchronization.
+4. Optional repository description.
+5. **Check readiness now**, enabled by default in the Add repository dialog.
+
+Before using Live mode, run or re-run the **Repository readiness** check and resolve every Live-required
+blocker or unknown result. The dashboard reports the readiness level, contract version, timestamp,
+category counts, remediation, and canonical Projects V2 status/priority mappings. Live task status
+changes, sync, starts, retries, and continuations recheck readiness and return `READINESS_BLOCKED`
+when the repository is not ready. Demo mode remains available without GitHub or Cline credentials and
+never edits the target repository.
+
+The control plane uses a repository-local `WORKFLOW.md` when present and otherwise falls back to the
+starter contract at [`workflows/default/WORKFLOW.md`](workflows/default/WORKFLOW.md). It does not
+silently copy this repository's `AGENTS.md` or `.agents/skills/` into a managed repository. If a target
+repository needs a missing `WORKFLOW.md` or pull-request template, the readiness card can propose an
+explicit **Create baseline via PR** action. That action adds only missing baseline files on a dedicated
+target-repository branch and opens a pull request for human review; it never merges automatically.
+
+## Documentation index
+
+Start with the [repository onboarding checklist](docs/repository-onboarding.md), then use the
+reference that matches the question:
+
+| Reference | Use it for |
+| --- | --- |
+| [Architecture](docs/architecture.md) | Runtime ownership, source-of-truth rules, integration seams, Live-run verification, and migration direction. |
+| [API contract](docs/api-contract.md) | Request limits, error shape, idempotency, follow-up workflow, and client recovery. |
+| [Security model](docs/security-model.md) | Host-side secrets, worktree boundaries, autonomy posture, backups, retention, and preserved evidence. |
+| [Local SQLite operations](docs/local-operations.md) | Migration backups, checkpointing, restore, and retention procedures. |
+| [Terminal reliability protocol](docs/terminal-reliability.md) | Safe-runner requirements, bounded commands, interruption recovery, and unknown remote state. |
+| [Default agent workflow](workflows/default/WORKFLOW.md) | Effective agent policy, branch/PR-first development, checkpoints, Live handoff, and Issue linkage. |
+| [Environment example](.env.example) | Local defaults, Live credentials, capacity, lease recovery, and retention variables. |
+| [Pull-request template](.github/pull_request_template.md) | Required task/LLD context, design, validation, security review, risks, and reviewer handoff. |
+| [Issue template](.github/ISSUE_TEMPLATE/task.md) | Required structure for new Issue-backed tasks and acceptance criteria. |
+| [LLDs](LLD/) | Durable designs, decisions, risks, and validation records for Issue-backed work. |
+
+The [repository-onboarding documentation Issue](https://github.com/maxlee98/project-agent-control-plane/issues/81)
+tracks this documentation work. The available readiness implementation is covered by the checklist;
+future improvements should be tracked separately from the current onboarding contract.
 
 ## Pull-request-first development
 
@@ -154,6 +198,7 @@ Merging remains a human decision; agents must not merge automatically.
 1. GitHub Projects V2 read sync, Issue creation/comments, and PR creation are wired for Live mode.
 2. ClineCore event translation and isolated worktrees are wired for Live mode.
 3. Automatic branch/commit/push/PR handoff is wired for Live mode.
-4. Hosted webhook reconciliation, richer Projects V2 status writes, and multi-user auth remain later hardening work.
+4. Repository readiness inspection, Live preflight gates, and explicit baseline pull-request preparation are wired for Live mode.
+5. Hosted webhook reconciliation, richer Projects V2 status writes, and multi-user auth remain later hardening work.
 
 See `docs/architecture.md` and `docs/security-model.md` for the implementation contract.
