@@ -13,6 +13,29 @@ export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 export const PRIORITY_LABELS = ["P0", "P1", "P2", "P3"] as const;
 export const DEFAULT_TASK_PRIORITY: TaskPriority = 3;
 
+export type FollowUpProposalOrigin = "generated" | "manual";
+export type FollowUpProposalResult = "created" | "failed" | "replayed";
+
+export interface FollowUpProposal {
+  id: string;
+  origin: FollowUpProposalOrigin;
+  title: string;
+  rationale: string;
+  priority: TaskPriority;
+  description: string;
+  acceptanceCriteria: string[];
+}
+
+export interface FollowUpCreationOutcome {
+  proposalId: string;
+  title: string;
+  result: FollowUpProposalResult;
+  taskId?: string;
+  issueNumber?: number;
+  githubUrl?: string;
+  message: string;
+}
+
 export function isTaskPriority(value: unknown): value is TaskPriority {
   return Number.isInteger(value) && TASK_PRIORITIES.includes(value as TaskPriority);
 }

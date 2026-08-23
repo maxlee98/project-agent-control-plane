@@ -322,6 +322,12 @@ export function getTask(taskId: string) {
   return row ? mapTask(row as TaskRow) : null;
 }
 
+export function getTaskActivity(taskId: string, limit = 10) {
+  const safeLimit = Math.max(1, Math.min(20, Math.floor(limit)));
+  return db.prepare("SELECT * FROM activity WHERE task_id = ? ORDER BY created_at DESC LIMIT ?")
+    .all(taskId, safeLimit).map((row) => mapActivity(row as ActivityRow));
+}
+
 export function getTaskByIssue(projectId: string, issueNumber: number) {
   const row = db.prepare("SELECT t.*, SUM(r.actual_cost_micros) AS actual_cost_micros, COUNT(r.id) AS run_count, COUNT(r.actual_cost_micros) AS priced_run_count, SUM(CASE WHEN r.cost_source = 'pending' THEN 1 ELSE 0 END) AS pending_run_count FROM tasks t LEFT JOIN runs r ON r.task_id = t.id WHERE t.project_id = ? AND t.issue_number = ? GROUP BY t.id").get(projectId, issueNumber);
   return row ? mapTask(row as TaskRow) : null;
