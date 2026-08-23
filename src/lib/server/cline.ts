@@ -13,6 +13,7 @@ declare global {
 export interface ClineCallbacks {
   onActivity(message: string, detail?: string | null): void;
   onEvent(event: RunEventDraft): void;
+  onHeartbeat?(): void;
   onUsage?(usage: RunUsageSnapshot): void;
 }
 
@@ -255,6 +256,7 @@ export async function runCline(input: AgentRunInput & { runId: string; providerI
     const eventSessionId = stringValue(payload?.sessionId);
     if (!eventSessionId || !sessionId || eventSessionId !== sessionId) return;
     lastActivityAt = Date.now();
+    callbacks.onHeartbeat?.();
 
     const translated = translateClineEvent(event);
     if (translated) {

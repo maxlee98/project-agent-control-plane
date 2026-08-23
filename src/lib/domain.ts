@@ -29,6 +29,7 @@ export function priorityFromLabel(value: unknown): TaskPriority | null {
 
 export type AgentState = "idle" | "running" | "waiting" | "failed" | "succeeded";
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "stopped";
+export type RunRecoveryStatus = "none" | "interrupted";
 export type ExecutionMode = "demo" | "live";
 export type ActivityTone = "cyan" | "amber" | "violet" | "rose" | "red" | "green" | "slate";
 export type RunCostSource = "pending" | "sdk" | "catalog" | "unavailable";
@@ -72,6 +73,7 @@ export type RunEventType =
   | "validation_failed"
   | "run_completed"
   | "run_failed"
+  | "run_recovered"
   | "run_stopped"
   | "handoff_complete"
   | "stage_started"
@@ -106,6 +108,7 @@ const RUN_EVENT_TYPES = new Set<RunEventType>([
   "validation_failed",
   "run_completed",
   "run_failed",
+  "run_recovered",
   "run_stopped",
   "handoff_complete",
   "stage_started",
@@ -197,6 +200,12 @@ export interface AgentRun {
   startedAt: string;
   finishedAt: string | null;
   error: string | null;
+  ownerId: string | null;
+  leaseHeartbeatAt: string | null;
+  leaseExpiresAt: string | null;
+  currentStage: string;
+  recoveryStatus: RunRecoveryStatus;
+  recoveryReason: string | null;
   executionMode: ExecutionMode;
   providerId: string;
   modelId: string;
