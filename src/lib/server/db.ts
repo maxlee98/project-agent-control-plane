@@ -100,6 +100,14 @@ function createDatabase() {
       detail TEXT,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS active_run_claims (
+      task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+      run_id TEXT NOT NULL UNIQUE REFERENCES runs(id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      execution_mode TEXT NOT NULL,
+      claimed_at TEXT NOT NULL,
+      lease_expires_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS request_deduplication (
       idempotency_key TEXT PRIMARY KEY,
       operation TEXT NOT NULL,
@@ -113,6 +121,8 @@ function createDatabase() {
     CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status);
     CREATE INDEX IF NOT EXISTS idx_runs_task ON runs(task_id, started_at DESC);
     CREATE INDEX IF NOT EXISTS idx_activity_created ON activity(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_active_run_claims_project ON active_run_claims(project_id, execution_mode);
+    CREATE INDEX IF NOT EXISTS idx_active_run_claims_lease ON active_run_claims(lease_expires_at);
     CREATE INDEX IF NOT EXISTS idx_request_deduplication_operation ON request_deduplication(operation);
   `);
 
@@ -143,6 +153,14 @@ function createDatabase() {
 
   seedDatabase(database);
   reconcileProjects(database);
+  database.prepare(`
+    INSERT OR IGNORE INTO active_run_claims (task_id, run_id, project_id, execution_mode, claimed_at, lease_expires_at)
+    SELECT r.task_id, r.id, r.project_id, r.execution_mode, r.started_at, '1970-01-01T00:00:00.000Z'
+    FROM runs r
+    WHERE r.status IN ('queued', 'running')
+      AND NOT EXISTS (SELECT 1 FROM active_run_claims c WHERE c.task_id = r.task_id)
+      AND r.id = (SELECT newest.id FROM runs newest WHERE newest.task_id = r.task_id AND newest.status IN ('queued', 'running') ORDER BY newest.started_at DESC, newest.id DESC LIMIT 1)
+  `).run();
   return database;
 }
 
@@ -379,6 +397,7 @@ function reconcileProjects(database: Database.Database) {
         database.prepare("UPDATE tasks SET project_id = ? WHERE project_id = ?").run(canonical.id, duplicate.id);
         database.prepare("UPDATE runs SET project_id = ? WHERE project_id = ?").run(canonical.id, duplicate.id);
         database.prepare("UPDATE activity SET project_id = ? WHERE project_id = ?").run(canonical.id, duplicate.id);
+        database.prepare("UPDATE active_run_claims SET project_id = ? WHERE project_id = ?").run(canonical.id, duplicate.id);
         database.prepare("DELETE FROM projects WHERE id = ?").run(duplicate.id);
       }
     }
