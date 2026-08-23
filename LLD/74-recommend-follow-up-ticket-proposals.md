@@ -125,7 +125,7 @@ No schema migration is required; proposals are transient and activity/idempotenc
 - [x] Implementation self-review completed
 - [x] Tests, typecheck, and build passed
 - [x] Documentation updated
-- [ ] Handoff verified (PR creation remains pending because this run has not committed/pushed)
+- [x] Handoff verified (PR #77 is open and targets `main`; branch and Issue linkage verified)
 
 ## Validation results
 - `npm run safe:run -- --timeout-ms 120000 -- node --experimental-strip-types --experimental-loader ./tests/extensionless-loader.mjs --test tests/follow-ups.test.ts tests/follow-ups-ui.test.ts` — passed, 7 tests.
@@ -135,3 +135,4 @@ No schema migration is required; proposals are transient and activity/idempotenc
 - `npm run safe:run -- --timeout-ms 120000 -- git diff --check` — passed.
 - Dependency install was required in the recovered workspace; npm reported 20 audit findings (3 low, 13 moderate, 4 high) and existing Node engine warnings for transitive packages. No dependency manifest changes were made.
 - Manual UI verification remains for a human reviewer: exercise the Done/Review action, edit and deselect generated proposals, add a manual proposal, confirm only a subset, and verify Demo/Live feedback with configured credentials.
+- PR handoff: commit `5691483e5646e8bac113893c91ee3672bee2f9e1`, branch `agent/74-Task-Recommend-follow-up-ticket-pr-7e665392`, PR `#77` (`https://github.com/maxlee98/project-agent-control-plane/pull/77`) open against `main`.
