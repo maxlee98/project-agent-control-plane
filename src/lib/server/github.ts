@@ -1,4 +1,4 @@
-import type { AgentRun, Project, Task, TaskStatus } from "../domain";
+import type { AgentRun, Project, ProjectStatusConcept, ProjectStatusMapping, Task, TaskStatus } from "../domain";
 import { normalizePrTitle } from "../pr-title";
 
 function githubRequest(path: string, init: RequestInit = {}) {
@@ -42,6 +42,12 @@ function statusFromLabel(value: string | undefined): TaskStatus {
 }
 
 type StatusOption = { id: string; name: string };
+
+export interface ProjectStatusCapability {
+  fieldName: string;
+  options: string[];
+  mappings: ProjectStatusMapping[];
+}
 
 type IssueApiRecord = {
   number?: number;
@@ -94,12 +100,59 @@ const statusOptionAliases: Record<TaskStatus, string[]> = {
   ready: ["ready", "todo", "backlog"],
   in_progress: ["in_progress", "in progress", "in-progress"],
   human_review: ["review", "human_review", "human review", "in_review", "in review", "agent_review", "agent review"],
-  blocked: ["blocked", "in progress"],
+  blocked: ["blocked"],
+  done: ["done", "complete", "completed"],
+};
+
+const readinessStatusAliases: Record<ProjectStatusConcept, string[]> = {
+  ready: ["ready", "todo", "backlog"],
+  in_progress: ["in_progress", "in progress", "in-progress"],
+  review: ["review", "human_review", "human review", "in_review", "in review", "agent_review", "agent review"],
+  blocked: ["blocked"],
   done: ["done", "complete", "completed"],
 };
 
 function normalizedOptionName(value: string) {
   return value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+export function mapCanonicalStatusOptions(options: StatusOption[]): ProjectStatusMapping[] {
+  return (Object.keys(readinessStatusAliases) as ProjectStatusConcept[]).map((concept) => {
+    const aliases = new Set(readinessStatusAliases[concept].map(normalizedOptionName));
+    const candidates = options.filter((option) => aliases.has(normalizedOptionName(option.name)));
+    return {
+      concept,
+      optionId: candidates.length === 1 ? candidates[0].id : null,
+      optionName: candidates.length === 1 ? candidates[0].name : null,
+      state: candidates.length === 1 ? "mapped" : candidates.length === 0 ? "missing" : "ambiguous",
+      candidates: candidates.map((option) => option.name),
+    };
+  });
+}
+
+export async function inspectProjectStatus(project: Project): Promise<ProjectStatusCapability> {
+  if (!project.githubProjectId) throw new Error("GitHub Projects V2 is not configured.");
+  type ProjectData = { node: { __typename: string; fields: { nodes: Array<{ id: string; name?: string; options?: StatusOption[] }> } } | null };
+  const data = await graphql<ProjectData>(`query ProjectStatus($id: ID!) {
+    node(id: $id) {
+      __typename
+      ... on ProjectV2 {
+        fields(first: 50) {
+          nodes {
+            __typename
+            ... on ProjectV2SingleSelectField { id name options { id name } }
+          }
+        }
+      }
+    }
+  }`, { id: project.githubProjectId });
+  if (!data.node) throw new Error("GitHub Project was not found or is not accessible.");
+  if (data.node.__typename !== "ProjectV2") throw new Error("GitHub node is not a Projects V2 project.");
+  const statusFields = data.node.fields.nodes.filter((field) => normalizedOptionName(field.name ?? "") === "status");
+  if (statusFields.length !== 1) throw new Error(statusFields.length === 0 ? "GitHub Project has no Status field." : "GitHub Project has ambiguous Status fields.");
+  const field = statusFields[0];
+  const options = field.options ?? [];
+  return { fieldName: field.name ?? "Status", options: options.map((option) => option.name), mappings: mapCanonicalStatusOptions(options) };
 }
 
 function issueStateForTaskStatus(status: TaskStatus): "open" | "closed" {
@@ -328,6 +381,30 @@ export async function createPullRequest(fullName: string, task: Task, run: Agent
   const number = Number(body.number);
   const url = String(body.html_url ?? "");
   if (!Number.isInteger(number) || number <= 0 || !url) throw new Error("GitHub created the pull request but returned incomplete metadata.");
+  return { url, number };
+}
+
+export async function createBaselinePullRequest(fullName: string, branch: string, base: string) {
+  const { owner, repo } = repoParts(fullName);
+  const existing = await findOpenPullRequest(owner, repo, branch, base);
+  if (existing) return existing;
+  const response = await githubRequest(`/repos/${owner}/${repo}/pulls`, {
+    method: "POST",
+    body: JSON.stringify({
+      title: "chore: add control-plane repository baseline",
+      head: branch,
+      base,
+      body: "## Repository readiness baseline\n\nThis pull request adds only the missing control-plane workflow and pull-request template files identified by the approved repository readiness check. Review and merge it manually; no automatic merge was performed.",
+    }),
+  });
+  if (response.status === 422) {
+    const createdByRetry = await findOpenPullRequest(owner, repo, branch, base);
+    if (createdByRetry) return createdByRetry;
+  }
+  const body = await readResponse<PullRequestApiRecord>(response);
+  const number = Number(body.number);
+  const url = String(body.html_url ?? "");
+  if (!Number.isInteger(number) || number <= 0 || !url) throw new Error("GitHub created the baseline pull request but returned incomplete metadata.");
   return { url, number };
 }
 

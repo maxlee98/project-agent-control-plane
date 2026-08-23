@@ -1,6 +1,8 @@
 import { startAgentRun } from "@/lib/server/orchestrator";
 import { claimIdempotencyKey, completeIdempotencyKey, getRun, isRunClaimError } from "@/lib/server/repository";
 import { isReasoningEffort, type ReasoningEffort } from "@/lib/domain";
+import { checkLiveReadiness } from "@/lib/server/readiness";
+import { getProject } from "@/lib/server/repository";
 import { apiError, apiErrorFrom, apiResponse, assertAllowedKeys, getIdempotencyKey, idempotencyResponse, parseJsonBody, requestFingerprint, validateIdentifier } from "@/lib/server/api";
 
 export async function POST(request: Request, { params }: { params: Promise<{ runId: string }> }) {
@@ -15,6 +17,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ run
     }
     const sourceRun = getRun(runId);
     if (!sourceRun) return apiError("RUN_NOT_FOUND", "Run not found.", 404);
+    if (process.env.EXECUTION_MODE === "live") {
+      const project = getProject(sourceRun.projectId);
+      if (!project) return apiError("PROJECT_NOT_FOUND", "Project not found.", 404);
+      const readiness = await checkLiveReadiness(project);
+      if (readiness.failure) return apiError("READINESS_BLOCKED", readiness.failure, 409);
+    }
     const key = getIdempotencyKey(request);
     const operation = "run.retry";
     const fingerprint = requestFingerprint({ runId, reasoningEffort: reasoningEffort || null });

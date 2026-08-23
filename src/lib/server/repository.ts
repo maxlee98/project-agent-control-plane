@@ -4,7 +4,7 @@ import { redactSecrets } from "./redaction";
 import { normalizeLocalPath } from "./paths";
 import { hasActiveClineSession } from "./cline";
 import { normalizeRunEventType, normalizeTaskStatus } from "../domain";
-import type { ActivityItem, AgentRun, DashboardData, Project, ReasoningEffort, RunCheck, RunCostSource, RunEvent, RunEventType, Task, TaskCostStatus, TaskStatus } from "../domain";
+import type { ActivityItem, AgentRun, DashboardData, Project, ReadinessReport, ReasoningEffort, RunCheck, RunCostSource, RunEvent, RunEventType, Task, TaskCostStatus, TaskStatus } from "../domain";
 import { getReasoningCapabilitySync, validateReasoningEffortSync } from "./reasoning";
 import { isReasoningEffort } from "../domain";
 
@@ -133,6 +133,10 @@ export function completeIdempotencyKey(key: string, operation: string, fingerpri
 }
 
 export function mapProject(row: ProjectRow): Project {
+  let readiness: ReadinessReport | null = null;
+  if (typeof row.readiness_json === "string") {
+    try { readiness = JSON.parse(row.readiness_json) as ReadinessReport; } catch { readiness = null; }
+  }
   return {
     id: String(row.id),
     name: String(row.name),
@@ -150,6 +154,7 @@ export function mapProject(row: ProjectRow): Project {
     activeAgents: Number(row.active_agents ?? 0),
     openTasks: Number(row.open_tasks ?? 0),
     openPrs: Number(row.open_prs ?? 0),
+    readiness,
   };
 }
 
@@ -320,6 +325,17 @@ export function getProject(projectId: string) {
   return row ? mapProject(row as ProjectRow) : null;
 }
 
+export function getProjectReadiness(projectId: string) {
+  const row = db.prepare("SELECT readiness_json FROM projects WHERE id = ?").get(projectId) as { readiness_json?: string | null } | undefined;
+  if (!row?.readiness_json) return null;
+  try { return JSON.parse(row.readiness_json) as ReadinessReport; } catch { return null; }
+}
+
+export function saveProjectReadiness(projectId: string, report: ReadinessReport) {
+  db.prepare("UPDATE projects SET readiness_json = ?, last_synced_at = ? WHERE id = ?").run(JSON.stringify(report), isoNow(), projectId);
+  return getProject(projectId);
+}
+
 export function createProject(input: { fullName: string; localPath: string; description?: string; githubProjectId?: string }) {
   const normalizedPath = normalizeLocalPath(input.localPath);
   const [owner, repo] = input.fullName.split("/");
@@ -330,7 +346,7 @@ export function createProject(input: { fullName: string; localPath: string; desc
     ?? (db.prepare("SELECT * FROM projects").all() as ProjectRow[]).find((row) => normalizeLocalPath(String(row.local_path)) === normalizedPath);
   if (existingRow) {
     if (Number(existingRow.is_demo) || input.githubProjectId?.trim()) {
-      db.prepare("UPDATE projects SET name = ?, full_name = ?, description = ?, initials = ?, local_path = ?, github_project_id = ?, is_demo = 0, status = 'attention', last_synced_at = ? WHERE id = ?")
+      db.prepare("UPDATE projects SET name = ?, full_name = ?, description = ?, initials = ?, local_path = ?, github_project_id = ?, is_demo = 0, status = 'attention', readiness_json = NULL, last_synced_at = ? WHERE id = ?")
         .run(displayName, input.fullName, input.description ?? String(existingRow.description ?? ""), initials, input.localPath, input.githubProjectId?.trim() || String(existingRow.github_project_id ?? "") || null, isoNow(), existingRow.id);
     }
     return mapProject(db.prepare("SELECT * FROM projects WHERE id = ?").get(existingRow.id) as ProjectRow);

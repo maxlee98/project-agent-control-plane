@@ -32,6 +32,7 @@ function createDatabase() {
       github_project_url TEXT,
       is_demo INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'connected',
+      readiness_json TEXT,
       last_synced_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS tasks (
@@ -150,6 +151,7 @@ function createDatabase() {
 
   const projectColumns = database.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>;
   if (!new Set(projectColumns.map((column) => column.name)).has("is_demo")) database.exec("ALTER TABLE projects ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0");
+  if (!new Set(projectColumns.map((column) => column.name)).has("readiness_json")) database.exec("ALTER TABLE projects ADD COLUMN readiness_json TEXT");
 
   seedDatabase(database);
   reconcileProjects(database);
