@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
+import { priorityFromLabel, priorityLabel } from "../src/lib/domain.ts";
 import type { AgentRun, Task } from "../src/lib/domain.ts";
 
 process.env.GITHUB_TOKEN = "test-token";
@@ -59,17 +60,17 @@ globalThis.fetch = async (input, init) => {
     return response({ data: {
       node: {
         __typename: "ProjectV2",
-        fields: { nodes: [{ id: "field-status", name: "Status", options: [{ id: "option-todo", name: "Todo" }, { id: "option-progress", name: "In Progress" }, { id: "option-review", name: "Review" }, { id: "option-done", name: "Done" }] }] },
+         fields: { nodes: [{ id: "field-status", name: "Status", options: [{ id: "option-todo", name: "Todo" }, { id: "option-progress", name: "In Progress" }, { id: "option-review", name: "Review" }, { id: "option-done", name: "Done" }] }, { id: "field-priority", name: "Priority", options: [{ id: "option-p0", name: "P0" }, { id: "option-p1", name: "P1" }, { id: "option-p2", name: "P2" }, { id: "option-p3", name: "P3" }] }] },
         items: { nodes: [
           {
             id: "item-10",
             content: { __typename: "Issue", id: "issue-node-10", number: 10, title: "Task #10", body: "", state: issueState === "closed" ? "CLOSED" : "OPEN", url: "https://github.com/maxlee98/project-agent-control-plane/issues/10", repository: { nameWithOwner: "maxlee98/project-agent-control-plane" }, labels: { nodes: [] } },
-            fieldValues: { nodes: [{ field: { id: "field-status", name: "Status" }, name: statusName, optionId: statusName === "Done" ? "option-done" : statusName === "Review" ? "option-review" : "option-progress" }] },
+             fieldValues: { nodes: [{ field: { id: "field-status", name: "Status" }, name: statusName, optionId: statusName === "Done" ? "option-done" : statusName === "Review" ? "option-review" : "option-progress" }, { field: { id: "field-priority", name: "Priority" }, name: "P2", optionId: "option-p2" }] },
           },
           ...(projectItemVisible ? [{
             id: "item-14",
             content: { __typename: "Issue", id: "issue-node-14", number: 14, title: "New Issue", body: "", state: "OPEN", url: "https://github.com/maxlee98/project-agent-control-plane/issues/14", repository: { nameWithOwner: "maxlee98/project-agent-control-plane" }, labels: { nodes: [] } },
-            fieldValues: { nodes: [{ field: { id: "field-status", name: "Status" }, name: "Todo", optionId: "option-todo" }] },
+             fieldValues: { nodes: [{ field: { id: "field-status", name: "Status" }, name: "Todo", optionId: "option-todo" }, { field: { id: "field-priority", name: "Priority" }, name: "P2", optionId: "option-p2" }] },
           }] : []),
         ], pageInfo: { hasNextPage: false, endCursor: null } },
       },
@@ -111,10 +112,22 @@ test("reads Projects V2 metadata and repairs a Done issue lifecycle", async () =
   assert.equal(items[0]?.status, "done");
   assert.equal(items[0]?.statusMapped, true);
   assert.equal(items[0]?.projectItemId, "item-10");
+  assert.equal(items[0]?.priority, 3);
+  assert.equal(items[0]?.priorityWasMissing, false);
   const result = await github.reconcileProjectItemLifecycle(project(), items[0]!);
   assert.deepEqual(result, { issueChanged: true });
   assert.equal(issueState, "closed");
   assert.deepEqual(calls.at(-1)?.body, { state: "closed", state_reason: "completed" });
+});
+
+test("uses the canonical P0-P3 mapping and includes priority in new Issue bodies", async () => {
+  assert.equal(priorityLabel(1), "P0");
+  assert.equal(priorityLabel(4), "P3");
+  assert.equal(priorityFromLabel("p2"), 3);
+  calls.length = 0;
+  await github.createIssue(project().fullName, "Priority body contract", "## Summary\n\nBody", 1);
+  const issueRequest = calls.find((call) => call.url.endsWith("/issues") && call.method === "POST");
+  assert.equal(issueRequest?.body?.body, "Priority: P0\n\n## Summary\n\nBody");
 });
 
 test("maps the exact Projects V2 Review option to the human review state", async () => {
@@ -203,11 +216,17 @@ test("adds a newly created Issue to Projects V2 exactly once", async () => {
     statusOptionName: "Todo",
     statusMapped: true,
     statusOptions: [{ id: "option-todo", name: "Todo" }, { id: "option-progress", name: "In Progress" }, { id: "option-review", name: "Review" }, { id: "option-done", name: "Done" }],
+     priorityFieldId: "field-priority",
+     priorityOptionId: "option-p2",
+     priorityOptionName: "P2",
+     priorityOptions: [{ id: "option-p0", name: "P0" }, { id: "option-p1", name: "P1" }, { id: "option-p2", name: "P2" }, { id: "option-p3", name: "P3" }],
     issueNumber: 14,
     issueState: "open",
     title: "New Issue",
     description: "",
     status: "ready",
+     priority: 3,
+     priorityWasMissing: false,
     labels: [],
     githubUrl: "https://github.com/maxlee98/project-agent-control-plane/issues/14",
   } });

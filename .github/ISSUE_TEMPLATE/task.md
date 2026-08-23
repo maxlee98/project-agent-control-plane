@@ -10,6 +10,12 @@ assignees: ""
 
 <!-- Give this task a short, outcome-focused summary. -->
 
+## Priority
+
+<!-- Required: choose exactly one dashboard/Projects value: P0, P1, P2, or P3. -->
+
+Priority: P2
+
 ## Context and evidence
 
 <!-- What prompted this task? Include relevant user feedback, examples, links, or reproduction details. -->
