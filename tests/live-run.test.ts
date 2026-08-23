@@ -37,7 +37,7 @@ process.env.AGENT_INACTIVITY_MINUTES = "1";
 
 const repository = await import("../src/lib/server/repository.ts");
 const database = (await import("../src/lib/server/db.ts")).db;
-const { executeLiveRun } = await import("../src/lib/server/orchestrator.ts");
+const { executeLiveRun, startAgentRun } = await import("../src/lib/server/orchestrator.ts");
 const { hasActiveClineSession, runCline } = await import("../src/lib/server/cline.ts");
 
 after(() => {
@@ -197,7 +197,7 @@ function createLiveFixture(label: string) {
   return { project, task, run };
 }
 
-function createDependencies(label: string, options: { commentFailure?: boolean; clineFailure?: boolean; checkFailure?: boolean } = {}): LiveRunDependencies {
+function createDependencies(label: string, options: { commentFailure?: boolean; clineFailure?: boolean; checkFailure?: boolean; commentBodies?: string[]; prompts?: string[] } = {}): LiveRunDependencies {
   const workspace: WorkspaceHandle = {
     repositoryPath: path.join(runtimeDir, `repository-${label}`),
     workspacePath: path.join(runtimeDir, `workspace-${label}`),
@@ -207,7 +207,8 @@ function createDependencies(label: string, options: { commentFailure?: boolean; 
   };
   return {
     prepareWorkspace: async () => workspace,
-    runCline: async (_input, callbacks) => {
+    runCline: async (input, callbacks) => {
+      options.prompts?.push(input.prompt);
       if (options.clineFailure) throw new Error(`Provider failed with token=${secret}`);
       callbacks.onActivity("Cline completed");
       callbacks.onEvent({ type: "output_summary", message: "Agent output summarized", detail: "Completed safely", checkpoint: false });
@@ -227,7 +228,8 @@ function createDependencies(label: string, options: { commentFailure?: boolean; 
     commitAndPush: async () => ({ sha: `commit-${label}`, changedFiles: [`src/${label}.ts`] }),
     createPullRequest: async () => ({ number: 36, url: `https://github.com/example/live-${label}/pull/36` }),
     reconcileTaskStatus: async () => ({ projectChanged: false, issueChanged: false, issueNumber: 36, githubUrl: `https://github.com/example/live-${label}/issues/36`, issueCreated: false, issueCorrected: false, projectItemAdded: false }),
-    publishComment: async () => {
+    publishComment: async (_fullName, _issueNumber, body) => {
+      options.commentBodies?.push(body);
       if (options.commentFailure) throw new Error(`GitHub API 422: token=${secret}`);
     },
   };
@@ -297,6 +299,60 @@ test("records a redacted stage failure and preserves the failed workspace", asyn
   assert.equal(failure?.detail?.includes(secret), false);
   assert.equal(task?.status, "blocked");
   assert.equal(task?.agentState, "failed");
+});
+
+test("publishes the blocked stage and reason to the Issue", async () => {
+  const fixture = createLiveFixture("blocked-comment");
+  const comments: string[] = [];
+  await executeLiveRun(fixture.run.id, fixture.task.id, undefined, createDependencies("blocked-comment", { clineFailure: true, commentBodies: comments }));
+
+  const failureComment = comments.find((body) => body.includes("Blocked reason:"));
+  assert.ok(failureComment);
+  assert.match(failureComment, /Stage: cline/);
+  assert.match(failureComment, /Reason: Provider failed with token=\[REDACTED_SECRET\]/);
+  assert.match(failureComment, /Next step: Inspect the preserved workspace/);
+});
+
+test("preserves blocked local state when the failure comment cannot be published", async () => {
+  const fixture = createLiveFixture("blocked-comment-failure");
+  await executeLiveRun(fixture.run.id, fixture.task.id, undefined, createDependencies("blocked-comment-failure", { clineFailure: true, commentFailure: true }));
+
+  const run = repository.getRun(fixture.run.id);
+  const task = repository.getTask(fixture.task.id);
+  const warning = repository.getRunEvents(fixture.run.id).find((event) => event.type === "issue_checkpoint_failed" && event.message.includes("failed"));
+
+  assert.equal(run?.status, "failed");
+  assert.equal(task?.status, "blocked");
+  assert.equal(task?.agentState, "failed");
+  assert.ok(warning);
+  assert.equal(warning.detail?.includes(secret), false);
+  assert.equal(warning.detail?.includes("[REDACTED_SECRET]"), true);
+});
+
+test("gives a blocked-task rerun the previous failure and unblock instructions", async () => {
+  const fixture = createLiveFixture("recovery-context");
+  await executeLiveRun(fixture.run.id, fixture.task.id, undefined, createDependencies("recovery-context", { clineFailure: true }));
+
+  const prompts: string[] = [];
+  let resolveCline: (() => void) | undefined;
+  const clineStarted = new Promise<void>((resolve) => { resolveCline = resolve; });
+  const dependencies = createDependencies("recovery-context-rerun", { prompts });
+  const originalRunCline = dependencies.runCline;
+  dependencies.runCline = async (input, callbacks) => {
+    const result = await originalRunCline(input, callbacks);
+    resolveCline?.();
+    return result;
+  };
+  const rerun = startAgentRun(fixture.task.id, "start", undefined, undefined, dependencies);
+  assert.ok(rerun && !(("error" in rerun) && rerun.error));
+  await clineStarted;
+
+  const prompt = prompts[0] ?? "";
+  assert.match(prompt, /## Recovery context/);
+  assert.match(prompt, new RegExp(`Previous run: ${fixture.run.id}`));
+  assert.match(prompt, /Live run failed during cline/);
+  assert.match(prompt, /find a safe way to unblock the task/);
+  assert.match(prompt, /do not blindly repeat the failed approach/);
 });
 
 test("redacts validation output before persisting a validation-stage failure", async () => {
