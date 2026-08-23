@@ -3,14 +3,26 @@ import test from "node:test";
 import { IssueCheckpointPublisher, formatIssueCheckpoint } from "../src/lib/server/issue-checkpoints.ts";
 
 test("formats a concise checkpoint without forwarding raw agent output", () => {
-  const body = formatIssueCheckpoint("run-123", { phase: "progress", progress: 108, detail: "Inspecting package scripts" });
+  const body = formatIssueCheckpoint("run-123", {
+    phase: "progress",
+    progress: 108,
+    workspace: "Isolated worktree",
+    branchName: "agent/70-progress",
+    now: "Implementing the checkpoint projection from LLD section 2",
+    next: "Run focused event and checkpoint tests.",
+    detail: "Inspecting package scripts",
+  });
 
   assert.equal(body, [
-    "Agent checkpoint: progress",
+    "Agent progress: progress",
     "",
     "Run: run-123",
     "Status: Agent is actively working in the isolated worktree.",
+    "Workspace: Isolated worktree",
+    "Branch: agent/70-progress",
     "Progress: 100%",
+    "Now: Implementing the checkpoint projection from LLD section 2",
+    "Next: Run focused event and checkpoint tests.",
     "Detail: Inspecting package scripts",
   ].join("\n"));
   assert.doesNotMatch(body, /tool|token|environment|prompt/i);
@@ -23,8 +35,8 @@ test("formats a bounded blocked reason with recovery guidance and redaction", ()
   });
 
   assert.match(body, /Status: Agent run is blocked because it failed before handoff\./);
-  assert.match(body, /Blocked reason: Stage: cline/);
   assert.match(body, /Next step: Inspect the preserved workspace/);
+  assert.match(body, /Blocked reason: Stage: cline/);
   assert.doesNotMatch(body, /token=unsafe-value/);
   assert.match(body, /…/);
   assert.ok(body.length < 2_500);
@@ -90,11 +102,11 @@ test("serializes checkpoints and reports GitHub failures without rejecting the r
   const first = publisher.checkpoint({ phase: "workspace" }, { force: true });
   const second = publisher.checkpoint({ phase: "handoff" }, { force: true });
   await Promise.resolve();
-  assert.deepEqual(order, ["Agent checkpoint: workspace"]);
+  assert.deepEqual(order, ["Agent progress: workspace"]);
   releaseFirst?.();
   await Promise.all([first, second]);
 
-  assert.deepEqual(order, ["Agent checkpoint: workspace", "Agent checkpoint: handoff"]);
+  assert.deepEqual(order, ["Agent progress: workspace", "Agent progress: handoff"]);
   assert.deepEqual(failures, ["handoff"]);
   publisher.stop();
 });

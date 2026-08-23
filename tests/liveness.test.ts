@@ -3,6 +3,7 @@ import { after, test } from "node:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import Database from "better-sqlite3";
 import { normalizeLocalPath } from "../src/lib/server/paths.ts";
 
 const previousNodeEnv = process.env.NODE_ENV;
@@ -10,6 +11,7 @@ const previousDataDir = process.env.DATA_DIR;
 const previousExecutionMode = process.env.EXECUTION_MODE;
 const runtimeDir = fs.mkdtempSync(path.join(os.tmpdir(), "control-plane-runtime-"));
 const migrationDir = fs.mkdtempSync(path.join(os.tmpdir(), "control-plane-migration-"));
+const checkoutPath = path.join(os.homedir(), "Documents/Repos/project-agent-control-plane");
 
 process.env.NODE_ENV = "production";
 process.env.DATA_DIR = runtimeDir;
@@ -20,29 +22,109 @@ const runtimeDatabase = (await import("../src/lib/server/db.ts")).db;
 const { runCline: runClineFromAnotherServerBoundary } = await import("../src/lib/server/cline.ts?dashboard-boundary");
 
 process.env.DATA_DIR = migrationDir;
+const legacyDatabase = new Database(path.join(migrationDir, "control-plane.db"));
+legacyDatabase.exec(`
+  CREATE TABLE projects (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    full_name TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    initials TEXT NOT NULL,
+    accent TEXT NOT NULL,
+    local_path TEXT NOT NULL,
+    default_branch TEXT NOT NULL DEFAULT 'main',
+    github_project_id TEXT,
+    github_project_url TEXT,
+    status TEXT NOT NULL DEFAULT 'connected',
+    last_synced_at TEXT NOT NULL
+  );
+  CREATE TABLE tasks (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    issue_number INTEGER,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'inbox',
+    priority INTEGER NOT NULL DEFAULT 3,
+    labels_json TEXT NOT NULL DEFAULT '[]',
+    assignee TEXT,
+    agent_state TEXT NOT NULL DEFAULT 'idle',
+    current_summary TEXT NOT NULL DEFAULT '',
+    branch_name TEXT,
+    pr_url TEXT,
+    github_url TEXT,
+    updated_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE runs (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    status TEXT NOT NULL,
+    session_id TEXT,
+    branch_name TEXT,
+    workspace_path TEXT,
+    progress INTEGER NOT NULL DEFAULT 0,
+    current_activity TEXT NOT NULL DEFAULT 'Queued for dispatch',
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    error TEXT
+  );
+  CREATE TABLE activity (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    task_id TEXT,
+    run_id TEXT,
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    detail TEXT,
+    tone TEXT NOT NULL DEFAULT 'slate',
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE run_events (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    message TEXT NOT NULL,
+    detail TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE active_run_claims (
+    task_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL UNIQUE,
+    project_id TEXT NOT NULL,
+    execution_mode TEXT NOT NULL,
+    claimed_at TEXT NOT NULL,
+    lease_expires_at TEXT NOT NULL
+  );
+  CREATE TABLE request_deduplication (
+    idempotency_key TEXT PRIMARY KEY,
+    operation TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    response_json TEXT,
+    response_status INTEGER,
+    created_at TEXT NOT NULL,
+    completed_at TEXT
+  );
+`);
+legacyDatabase.prepare("INSERT INTO projects (id, name, full_name, initials, accent, local_path, last_synced_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+  .run("project-control-plane", "Control Plane", "maxlee98/project-agent-control-plane", "CP", "#c9ff6b", "~/Documents/Repos/project-agent-control-plane", new Date().toISOString());
+legacyDatabase.prepare("INSERT INTO projects (id, name, full_name, initials, accent, local_path, last_synced_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+  .run("project-duplicate", "Project Agent Control Plane", "maxlee98/project-agent-control-plane-legacy", "PA", "#ff9d66", checkoutPath, new Date().toISOString());
+legacyDatabase.prepare("INSERT INTO tasks (id, project_id, issue_number, title, description, status, priority, labels_json, assignee, agent_state, current_summary, updated_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+  .run("task-duplicate", "project-duplicate", 99, "Preserve this task", "Task history must survive reconciliation.", "ready", 2, "[]", "You", "idle", "Keep this record.", new Date().toISOString(), new Date().toISOString());
+legacyDatabase.prepare("INSERT INTO runs (id, task_id, project_id, mode, status, session_id, branch_name, workspace_path, progress, current_activity, started_at, finished_at, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+  .run("run-duplicate", "task-duplicate", "project-duplicate", "start", "completed", null, null, null, 100, "Completed", new Date().toISOString(), new Date().toISOString(), null);
+legacyDatabase.prepare("INSERT INTO activity (id, project_id, task_id, run_id, type, title, detail, tone, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+  .run("activity-duplicate", "project-duplicate", "task-duplicate", "run-duplicate", "checkpoint", "Preserve activity", "Activity history must survive reconciliation.", "cyan", new Date().toISOString());
+legacyDatabase.prepare("INSERT INTO run_events (id, run_id, type, message, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+  .run("event-duplicate", "run-duplicate", "checkpoint", "Preserve event", "Run events remain linked to the run.", new Date().toISOString());
+legacyDatabase.close();
 const migrationDatabase = (await import("../src/lib/server/db.ts?migration-initial")).db;
-const checkoutPath = path.join(os.homedir(), "Documents/Repos/project-agent-control-plane");
-
-migrationDatabase.prepare(`
-  INSERT INTO projects (id, name, full_name, description, initials, accent, local_path, default_branch, github_project_id, github_project_url, is_demo, status, last_synced_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`).run("project-duplicate", "Project Agent Control Plane", "maxlee98/project-agent-control-plane", "User project", "PA", "#ff9d66", checkoutPath, "main", null, null, 0, "connected", new Date().toISOString());
-migrationDatabase.prepare(`
-  INSERT INTO tasks (id, project_id, issue_number, title, description, status, priority, labels_json, assignee, agent_state, current_summary, branch_name, pr_url, github_url, updated_at, created_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`).run("task-duplicate", "project-duplicate", 99, "Preserve this task", "Task history must survive reconciliation.", "ready", 2, "[]", "You", "idle", "Keep this record.", null, null, null, new Date().toISOString(), new Date().toISOString());
-migrationDatabase.prepare(`
-  INSERT INTO runs (id, task_id, project_id, mode, status, session_id, branch_name, workspace_path, progress, current_activity, started_at, finished_at, error, execution_mode, commit_sha, changed_files_json, checks_json)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`).run("run-duplicate", "task-duplicate", "project-duplicate", "start", "completed", null, null, null, 100, "Completed", new Date().toISOString(), new Date().toISOString(), null, "demo", null, "[]", "[]");
-migrationDatabase.prepare(`
-  INSERT INTO activity (id, project_id, task_id, run_id, type, title, detail, tone, created_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-`).run("activity-duplicate", "project-duplicate", "task-duplicate", "run-duplicate", "checkpoint", "Preserve activity", "Activity history must survive reconciliation.", "cyan", new Date().toISOString());
-migrationDatabase.prepare(`
-  INSERT INTO run_events (id, run_id, type, message, detail, created_at)
-  VALUES (?, ?, ?, ?, ?, ?)
-`).run("event-duplicate", "run-duplicate", "checkpoint", "Preserve event", "Run events remain linked to the run.", new Date().toISOString());
+// The legacy rows were inserted before startup to prove that linked history survives the upgrade.
+assert.equal(fs.readdirSync(path.join(migrationDir, "backups")).length, 1);
 migrationDatabase.close();
 const reconciledDatabase = (await import("../src/lib/server/db.ts?migration-rerun")).db;
 

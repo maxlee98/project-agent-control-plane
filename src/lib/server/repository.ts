@@ -21,6 +21,7 @@ declare global {
 
 const isoNow = () => new Date().toISOString();
 const TERMINAL_RUN_STATUSES = new Set<AgentRun["status"]>(["completed", "failed", "stopped"]);
+const HIDDEN_HUMAN_RUN_EVENT_TYPES = new Set<RunEventType>(["session_started", "tool_started", "tool_finished"]);
 const DEFAULT_GLOBAL_RUN_LIMIT = 4;
 const DEFAULT_PROJECT_RUN_LIMIT = 2;
 const DEFAULT_RUN_LEASE_MINUTES = 5;
@@ -334,6 +335,12 @@ export function getTask(taskId: string) {
   return row ? mapTask(row as TaskRow) : null;
 }
 
+export function getTaskActivity(taskId: string, limit = 10) {
+  const safeLimit = Math.max(1, Math.min(20, Math.floor(limit)));
+  return db.prepare("SELECT * FROM activity WHERE task_id = ? ORDER BY created_at DESC LIMIT ?")
+    .all(taskId, safeLimit).map((row) => mapActivity(row as ActivityRow));
+}
+
 export function getTaskByIssue(projectId: string, issueNumber: number) {
   const row = db.prepare("SELECT t.*, SUM(r.actual_cost_micros) AS actual_cost_micros, COUNT(r.id) AS run_count, COUNT(r.actual_cost_micros) AS priced_run_count, SUM(CASE WHEN r.cost_source = 'pending' THEN 1 ELSE 0 END) AS pending_run_count FROM tasks t LEFT JOIN runs r ON r.task_id = t.id WHERE t.project_id = ? AND t.issue_number = ? GROUP BY t.id").get(projectId, issueNumber);
   return row ? mapTask(row as TaskRow) : null;
@@ -453,9 +460,10 @@ export function completeTaskByHuman(taskId: string, summary?: string) {
 export function addTaskComment(taskId: string, comment: string) {
   const task = getTask(taskId);
   if (!task) return null;
+  const safeComment = redactSecrets(comment) ?? "";
   const now = isoNow();
-  updateTask(taskId, { summary: comment });
-  addActivity({ projectId: task.projectId, taskId, type: "human_input", title: "Human context added", detail: comment, tone: "rose" });
+  updateTask(taskId, { summary: safeComment });
+  addActivity({ projectId: task.projectId, taskId, type: "human_input", title: "Human context added", detail: safeComment, tone: "rose" });
   return { ...getTask(taskId), createdAt: now };
 }
 
@@ -619,9 +627,10 @@ export function getRunEvents(runId?: string): RunEvent[] {
   const rows = runId
     ? db.prepare("SELECT * FROM run_events WHERE run_id = ? ORDER BY created_at DESC LIMIT 100").all(runId)
     : db.prepare("SELECT * FROM run_events ORDER BY created_at DESC LIMIT 160").all();
-  return rows.map((row) => {
+  return rows.flatMap((row) => {
     const event = row as Record<string, unknown>;
     const type = normalizeRunEventType(event.type);
+    if (HIDDEN_HUMAN_RUN_EVENT_TYPES.has(type)) return [];
     return {
       id: String(event.id),
       runId: String(event.run_id),

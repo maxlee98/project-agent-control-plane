@@ -37,11 +37,15 @@ You are working on a task selected by the Project Agent Control Plane.
 
 - The control plane owns the stable run-event vocabulary. Treat agent/tool event names as an
   implementation detail and do not depend on them in task summaries or handoffs.
-- Detailed progress, tool activity, output chunks, and bounded summaries remain local run history.
-- GitHub receives concise host-generated checkpoints at meaningful validation, failure, stop, and
-  final handoff boundaries only; never publish every tool call or output chunk.
+- Detailed progress, tool activity, and output chunks remain local implementation history. A selected,
+  bounded completed agent output summary may be retained as a human-facing progress signal.
+- GitHub receives concise host-generated checkpoints at start, workspace, meaningful summary/progress,
+  validation, failure, stop, and final handoff boundaries; never publish every tool call or output
+  chunk.
 - Keep event details concise and redacted. Do not include credentials, session identifiers, raw tool
-  input/output, arbitrary provider metadata, or full prompts in events or comments.
+  input/output, arbitrary provider metadata, or full prompts in events or comments. GitHub should show
+  the safe workspace label and branch, current intent, next action, validation outcome, and review
+  handoff metadata; the full workspace path belongs only in the local Run console.
 
 ## Terminal hard stop
 

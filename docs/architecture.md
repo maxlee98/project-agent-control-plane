@@ -86,3 +86,20 @@ SQLite is intentionally behind a small repository module. The hosted migration i
 2. A queue/Redis stream for orchestration events.
 3. Object storage for long logs and artifacts.
 4. Webhooks for GitHub changes, with polling retained as reconciliation.
+
+## Local SQLite operations and retention
+
+`src/lib/server/db.ts` owns an ordered, idempotent migration registry. Every existing database is
+upgraded through the same versions as a fresh database, and each successful version is recorded in
+`schema_migrations`. When a database has pending migrations, startup first checkpoints the WAL and
+writes a timestamped SQLite backup to `.data/backups/` (or the configured `DATA_DIR`). A migration
+failure names the failed version and backup path; restore the backup rather than editing the version
+table by hand. See [local operations](local-operations.md) for the bounded stop/checkpoint/restore
+procedure.
+
+Successful startup also performs best-effort cleanup using configurable day windows. Run events are
+retained for 90 days, activity for 180 days, completed runs for 365 days, and terminal remote
+delivery metadata for 180 days by default. Cleanup only removes completed, low-risk history after its
+event/activity rows are no longer needed. Active claims, queued/running runs, failed or stopped runs,
+failed/running agent states, non-null worktree evidence, `in_progress` tasks, and `human_review` tasks
+are never removed automatically. A cleanup failure does not prevent boot; the next startup retries it.

@@ -112,13 +112,14 @@ call; no destructive migration is required.
 - [x] Handoff implementation documented and PR verified
 
 ## Validation results
-- `npm run safe:run -- --timeout-ms 120000 -- npm test` — passed, 99 tests after merging current
-  `origin/main` priority changes.
+- `npm run safe:run -- --timeout-ms 120000 -- npm test` — passed, 119 tests after reconciling current
+  `main` and adding focused Live-readiness and baseline safety coverage.
 - The focused readiness tests cover missing checkout, valid Git root, no execution of detected
   validation, default workflow selection, baseline proposal, and safe redaction. GitHub status
   mapping is exposed through the adapter capability method and retains the existing mocked adapter
-  coverage. Additional safeguards reject ambiguous task status options and gate Live sync/status
-  mutations on a fresh readiness assessment.
+  coverage. Additional safeguards reject ambiguous task status options, gate Live sync/status
+  mutations on a fresh readiness assessment, preserve Demo availability while Live is blocked, and
+  reject baseline requests before mutation when the origin is invalid.
 - `npm run safe:run -- --timeout-ms 120000 -- npm run typecheck` — passed after installing dependencies.
 - `npm run safe:run -- --timeout-ms 120000 -- git diff --check` — passed.
 - `npm install` was required because dependencies were not present; npm reported existing audit

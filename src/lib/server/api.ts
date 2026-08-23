@@ -13,6 +13,12 @@ export const API_LIMITS = {
   label: 50,
   labels: 20,
   estimatedCostCents: 100_000_000,
+  followUpProposals: 5,
+  followUpTitle: 200,
+  followUpRationale: 2_000,
+  followUpDescription: 6_000,
+  followUpAcceptanceCriteria: 8,
+  followUpAcceptanceCriterion: 500,
 } as const;
 
 export type ApiDetails = Record<string, boolean | number | string | string[]>;

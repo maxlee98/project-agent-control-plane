@@ -17,11 +17,25 @@ delete process.env.CLINE_API_KEY;
 
 const repository = await import("../src/lib/server/repository.ts");
 const database = (await import("../src/lib/server/db.ts?readiness")).db;
-const { assessProjectReadiness, remoteRepository } = await import("../src/lib/server/readiness.ts");
+const { assessProjectReadiness, liveReadinessFailure, remoteRepository } = await import("../src/lib/server/readiness.ts");
+const { prepareBaselinePullRequest } = await import("../src/lib/server/baseline.ts");
 const { hasCanonicalPriorityOptions, mapCanonicalPriorityOptions, mapCanonicalStatusOptions } = await import("../src/lib/server/github.ts");
 
 async function git(cwd: string, args: string[]) {
   return execFile("git", ["-C", cwd, ...args]);
+}
+
+async function createCheckout(remote: string) {
+  const checkout = fs.mkdtempSync(path.join(root, "baseline-checkout-"));
+  await git(checkout, ["init", "-b", "main"]);
+  await git(checkout, ["config", "user.email", "readiness@example.invalid"]);
+  await git(checkout, ["config", "user.name", "Readiness Test"]);
+  fs.writeFileSync(path.join(checkout, "README.md"), "fixture\n");
+  await git(checkout, ["add", "README.md"]);
+  await git(checkout, ["commit", "-m", "fixture"]);
+  await git(checkout, ["remote", "add", "origin", remote]);
+  await git(checkout, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
+  return checkout;
 }
 
 function project(localPath: string): Project {
@@ -94,6 +108,48 @@ test("requires the exact dashboard and Projects V2 P0-P3 priority contract", () 
   assert.deepEqual(mappings.map((mapping) => mapping.optionName), ["P0", "P1", "P2", "P3"]);
   assert.equal(mapCanonicalPriorityOptions([{ id: "p0-a", name: "P0" }, { id: "p0-b", name: "P0" }, ...options.slice(1)]).find((mapping) => mapping.label === "P0")?.state, "ambiguous");
   assert.equal(hasCanonicalPriorityOptions([...options, { id: "extra", name: "Urgent" }]), false);
+});
+
+test("keeps Demo inspection available while reporting a Live readiness blocker", async () => {
+  const checkout = path.join(root, "demo-ready-checkout");
+  fs.mkdirSync(checkout, { recursive: true });
+  await git(checkout, ["init", "-b", "main"]);
+  await git(checkout, ["config", "user.email", "readiness@example.invalid"]);
+  await git(checkout, ["config", "user.name", "Readiness Test"]);
+  fs.writeFileSync(path.join(checkout, "package.json"), JSON.stringify({ scripts: { test: "echo untrusted" } }));
+  await git(checkout, ["add", "package.json"]);
+  await git(checkout, ["commit", "-m", "fixture"]);
+
+  const report = await assessProjectReadiness(project(checkout));
+  assert.equal(report.overallLevel, "demo_ready");
+  assert.match(liveReadinessFailure(report) ?? "", /Live mode is blocked by repository readiness/);
+  assert.equal(JSON.stringify(report).includes("echo untrusted"), false);
+});
+
+test("does not mutate a repository when its baseline is already present", async () => {
+  const checkout = await createCheckout("https://github.com/example/readiness.git");
+  fs.writeFileSync(path.join(checkout, "WORKFLOW.md"), "local workflow\n");
+  fs.mkdirSync(path.join(checkout, ".github"), { recursive: true });
+  fs.writeFileSync(path.join(checkout, ".github", "pull_request_template.md"), "template\n");
+  await git(checkout, ["add", "WORKFLOW.md", ".github/pull_request_template.md"]);
+  await git(checkout, ["commit", "-m", "baseline present"]);
+
+  const before = (await git(checkout, ["worktree", "list", "--porcelain"])).stdout;
+  const result = await prepareBaselinePullRequest(project(checkout));
+  const after = (await git(checkout, ["worktree", "list", "--porcelain"])).stdout;
+
+  assert.deepEqual(result, { alreadyPresent: true, files: [] });
+  assert.equal(after, before);
+});
+
+test("rejects a baseline request before mutation when origin does not match", async () => {
+  const checkout = await createCheckout("https://github.com/other/repository.git");
+  const before = (await git(checkout, ["status", "--short"])).stdout;
+
+  await assert.rejects(() => prepareBaselinePullRequest(project(checkout)), /origin does not match/);
+
+  assert.equal((await git(checkout, ["status", "--short"])).stdout, before);
+  assert.equal((await git(checkout, ["worktree", "list", "--porcelain"])).stdout.split("\n").filter((line) => line.startsWith("worktree ")).length, 1);
 });
 
 test("inspects a valid checkout without executing project validation", async () => {
