@@ -106,12 +106,53 @@ Local SQLite migrations, backup/checkpoint, restore, and conservative history-re
 documented in [docs/local-operations.md](docs/local-operations.md). The retention defaults can be
 overridden with the `*_RETENTION_DAYS` variables in `.env.local`.
 
-## Repository setup
+## Repository setup and onboarding
 
-Use the **Add repository** flow to register a checkout and its GitHub Projects V2 board. Each
-managed repository can optionally contain a `WORKFLOW.md` with its own coding conventions,
-validation commands, branch rules, and handoff expectations. A starter contract lives at
-`workflows/default/WORKFLOW.md`.
+Use the **Add repository** flow to register a checkout and, for Live mode, its GitHub Projects V2
+board. The detailed, copyable procedure is in the [repository onboarding checklist](docs/repository-onboarding.md).
+
+The current flow records these values in local SQLite and does not clone, inspect, install, create a
+branch, or modify the target checkout:
+
+1. GitHub `owner/repository` name.
+2. Absolute or `~/` local checkout path.
+3. Projects V2 node ID (`PVT_…`), optional in Demo and required for Live synchronization.
+4. Optional repository description.
+
+Before using Live mode, manually verify that the checkout is the intended Git repository with an
+accessible `origin/main`, supports isolated worktrees, has an effective `WORKFLOW.md` and validation
+plan, and is ready for the Projects V2 status/priority contract. Demo mode remains available without
+GitHub or Cline credentials and never edits the target repository.
+
+The control plane uses a repository-local `WORKFLOW.md` when present and otherwise falls back to the
+starter contract at [`workflows/default/WORKFLOW.md`](workflows/default/WORKFLOW.md). It does not
+silently copy this repository's `AGENTS.md`, `.agents/skills/`, or pull-request template into a
+managed repository. If a target repository needs a missing workflow baseline or PR template, create
+it on a dedicated target-repository branch and deliver it through a pull request with human review.
+Repository-readiness reports and baseline-PR preparation are planned separately; they are not part of
+the current Add repository flow.
+
+## Documentation index
+
+Start with the [repository onboarding checklist](docs/repository-onboarding.md), then use the
+reference that matches the question:
+
+| Reference | Use it for |
+| --- | --- |
+| [Architecture](docs/architecture.md) | Runtime ownership, source-of-truth rules, integration seams, Live-run verification, and migration direction. |
+| [API contract](docs/api-contract.md) | Request limits, error shape, idempotency, follow-up workflow, and client recovery. |
+| [Security model](docs/security-model.md) | Host-side secrets, worktree boundaries, autonomy posture, backups, retention, and preserved evidence. |
+| [Local SQLite operations](docs/local-operations.md) | Migration backups, checkpointing, restore, and retention procedures. |
+| [Terminal reliability protocol](docs/terminal-reliability.md) | Safe-runner requirements, bounded commands, interruption recovery, and unknown remote state. |
+| [Default agent workflow](workflows/default/WORKFLOW.md) | Effective agent policy, branch/PR-first development, checkpoints, Live handoff, and Issue linkage. |
+| [Environment example](.env.example) | Local defaults, Live credentials, capacity, lease recovery, and retention variables. |
+| [Pull-request template](.github/pull_request_template.md) | Required task/LLD context, design, validation, security review, risks, and reviewer handoff. |
+| [Issue template](.github/ISSUE_TEMPLATE/task.md) | Required structure for new Issue-backed tasks and acceptance criteria. |
+| [LLDs](LLD/) | Durable designs, decisions, risks, and validation records for Issue-backed work. |
+
+The [repository-onboarding documentation Issue](https://github.com/maxlee98/project-agent-control-plane/issues/81)
+tracks this documentation work. Automated repository inspection and Live preflight gating should be
+tracked separately from the current manual checklist.
 
 ## Pull-request-first development
 
