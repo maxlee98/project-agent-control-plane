@@ -51,7 +51,9 @@ owner ID and atomically claims the run only when no unexpired owner exists. Rene
 are conditional on matching the owner and active run status.
 
 On database initialization, and from a bounded recovery interval, the repository scans at most the
-configured batch size for queued/running Live runs whose lease has expired. Each row is atomically
+configured batch size for queued/running runs whose claim or durable lease has expired. This includes
+legacy/Demo claims, which still use the shared claim table even though they do not have a Live owner
+lease. Each row is atomically
 changed to `failed`, with `finished_at`, a fixed redacted interruption error, and cleared ownership;
 the associated task is changed to `blocked`/`failed` with a continuation-oriented summary. A unique
 recovery event/activity is written in the same transaction. Recovery only updates rows still active

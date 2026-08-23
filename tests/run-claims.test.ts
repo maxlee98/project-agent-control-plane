@@ -103,7 +103,21 @@ test("releases terminal claims and recovers expired claims without deleting hist
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM runs WHERE id = ?").get(expiredRun.id).count, 1);
 });
 
+test("recovers an expired demo claim so it cannot block the task forever", () => {
+  process.env.EXECUTION_MODE = "demo";
+  const demo = fixture("expired-demo");
+  const run = repository.createRun({ taskId: demo.task.id, mode: "start" });
+  assert.ok(run);
+  database.prepare("UPDATE active_run_claims SET lease_expires_at = ? WHERE run_id = ?").run("1970-01-01T00:00:00.000Z", run.id);
+
+  assert.equal(repository.recoverExpiredRunClaims(), 1);
+  assert.equal(repository.getRun(run.id)?.status, "failed");
+  assert.equal(repository.getTask(demo.task.id)?.agentState, "failed");
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM active_run_claims WHERE run_id = ?").get(run.id).count, 0);
+});
+
 test("persists fenced lease metadata, renews healthy ownership, and supports restart recovery", () => {
+  process.env.EXECUTION_MODE = "live";
   const runFixture = fixture("lease-lifecycle");
   const run = repository.createRun({ taskId: runFixture.task.id, mode: "start" });
   assert.ok(run);

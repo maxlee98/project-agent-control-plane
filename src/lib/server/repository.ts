@@ -96,7 +96,7 @@ export function getRunLeaseIntervalMs() {
 export function recoverExpiredRunClaims() {
   const now = isoNow();
   const recover = db.transaction(() => {
-    const claims = db.prepare("SELECT r.task_id, r.id AS run_id, r.project_id FROM runs r LEFT JOIN active_run_claims c ON c.run_id = r.id WHERE r.execution_mode = 'live' AND r.status IN ('queued', 'running') AND ((r.lease_expires_at IS NOT NULL AND r.lease_expires_at <= ?) OR (c.lease_expires_at IS NOT NULL AND c.lease_expires_at <= ?)) ORDER BY COALESCE(r.lease_expires_at, c.lease_expires_at) ASC LIMIT ?").all(now, now, getRecoveryBatchSize()) as Array<{ task_id: string; run_id: string; project_id: string }>;
+    const claims = db.prepare("SELECT r.task_id, r.id AS run_id, r.project_id FROM runs r LEFT JOIN active_run_claims c ON c.run_id = r.id WHERE r.status IN ('queued', 'running') AND ((r.lease_expires_at IS NOT NULL AND r.lease_expires_at <= ?) OR (c.lease_expires_at IS NOT NULL AND c.lease_expires_at <= ?)) ORDER BY COALESCE(r.lease_expires_at, c.lease_expires_at) ASC LIMIT ?").all(now, now, getRecoveryBatchSize()) as Array<{ task_id: string; run_id: string; project_id: string }>;
     let recoveredCount = 0;
     for (const claim of claims) {
       const message = "Run was interrupted after its lease expired. Review the preserved workspace, then continue or retry.";
