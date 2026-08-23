@@ -8,6 +8,25 @@ export const BOARD_COLUMNS = [
 ] as const;
 
 export type TaskStatus = (typeof BOARD_COLUMNS)[number]["id"];
+export const TASK_PRIORITIES = [1, 2, 3, 4] as const;
+export type TaskPriority = (typeof TASK_PRIORITIES)[number];
+export const PRIORITY_LABELS = ["P0", "P1", "P2", "P3"] as const;
+export const DEFAULT_TASK_PRIORITY: TaskPriority = 3;
+
+export function isTaskPriority(value: unknown): value is TaskPriority {
+  return Number.isInteger(value) && TASK_PRIORITIES.includes(value as TaskPriority);
+}
+
+export function priorityLabel(priority: TaskPriority | number) {
+  return PRIORITY_LABELS[priority - 1] ?? "P2";
+}
+
+export function priorityFromLabel(value: unknown): TaskPriority | null {
+  if (typeof value !== "string") return null;
+  const index = PRIORITY_LABELS.indexOf(value.trim().toUpperCase() as typeof PRIORITY_LABELS[number]);
+  return index === -1 ? null : (index + 1) as TaskPriority;
+}
+
 export type AgentState = "idle" | "running" | "waiting" | "failed" | "succeeded";
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "stopped";
 export type ExecutionMode = "demo" | "live";
@@ -152,7 +171,7 @@ export interface Task {
   actualCostUsd: number | null;
   actualCostStatus: TaskCostStatus;
   status: TaskStatus;
-  priority: 1 | 2 | 3 | 4;
+  priority: TaskPriority;
   labels: string[];
   assignee: "You" | "Agent" | null;
   agentState: AgentState;

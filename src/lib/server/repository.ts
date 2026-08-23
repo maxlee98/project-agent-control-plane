@@ -3,8 +3,8 @@ import { db } from "./db";
 import { redactSecrets } from "./redaction";
 import { normalizeLocalPath } from "./paths";
 import { hasActiveClineSession } from "./cline";
-import { normalizeRunEventType, normalizeTaskStatus } from "../domain";
-import type { ActivityItem, AgentRun, DashboardData, Project, ReasoningEffort, RunCheck, RunCostSource, RunEvent, RunEventType, Task, TaskCostStatus, TaskStatus } from "../domain";
+import { DEFAULT_TASK_PRIORITY, normalizeRunEventType, normalizeTaskStatus } from "../domain";
+import type { ActivityItem, AgentRun, DashboardData, Project, ReasoningEffort, RunCheck, RunCostSource, RunEvent, RunEventType, Task, TaskCostStatus, TaskPriority, TaskStatus } from "../domain";
 import { getReasoningCapabilitySync, validateReasoningEffortSync } from "./reasoning";
 import { isReasoningEffort } from "../domain";
 
@@ -346,26 +346,26 @@ export function createProject(input: { fullName: string; localPath: string; desc
   return mapProject(db.prepare("SELECT * FROM projects WHERE id = ?").get(id) as ProjectRow);
 }
 
-export function createTask(input: { projectId: string; title: string; description?: string; estimatedCostCents?: number; status?: TaskStatus; priority?: number; labels?: string[]; issueNumber?: number; githubUrl?: string | null }) {
+export function createTask(input: { projectId: string; title: string; description?: string; estimatedCostCents?: number; status?: TaskStatus; priority?: TaskPriority; labels?: string[]; issueNumber?: number; githubUrl?: string | null }) {
   const now = isoNow();
   const id = `task-${randomUUID()}`;
   db.prepare(`
     INSERT INTO tasks (id, project_id, issue_number, title, description, estimated_cost_cents, status, priority, labels_json, assignee, agent_state, current_summary, github_url, updated_at, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'idle', ?, ?, ?, ?)
-  `).run(id, input.projectId, input.issueNumber ?? null, input.title, input.description ?? "", input.estimatedCostCents ?? 0, input.status ?? "inbox", input.priority ?? 3, json(input.labels), "New task — ready for context.", input.githubUrl ?? null, now, now);
+  `).run(id, input.projectId, input.issueNumber ?? null, input.title, input.description ?? "", input.estimatedCostCents ?? 0, input.status ?? "inbox", input.priority ?? DEFAULT_TASK_PRIORITY, json(input.labels), "New task — ready for context.", input.githubUrl ?? null, now, now);
   addActivity({ projectId: input.projectId, taskId: id, type: "task", title: "Task created", detail: input.title, tone: "cyan" });
   return getTask(id);
 }
 
-export function upsertSyncedTask(input: { projectId: string; issueNumber: number; title: string; description: string; status: TaskStatus; labels: string[]; githubUrl: string | null }) {
+export function upsertSyncedTask(input: { projectId: string; issueNumber: number; title: string; description: string; status: TaskStatus; priority: TaskPriority; labels: string[]; githubUrl: string | null }) {
   const existing = db.prepare("SELECT id FROM tasks WHERE project_id = ? AND issue_number = ?").get(input.projectId, input.issueNumber) as { id?: string } | undefined;
   if (!existing?.id) return createTask(input);
-  updateTask(existing.id, { title: input.title, description: input.description, status: input.status, agentState: input.status === "done" ? "idle" : undefined, summary: "Synced from GitHub Projects V2." });
+  updateTask(existing.id, { title: input.title, description: input.description, status: input.status, priority: input.priority, agentState: input.status === "done" ? "idle" : undefined, summary: "Synced from GitHub Projects V2." });
   db.prepare("UPDATE tasks SET labels_json = ?, github_url = ?, updated_at = ? WHERE id = ?").run(json(input.labels), input.githubUrl, isoNow(), existing.id);
   return getTask(existing.id);
 }
 
-export function updateTask(taskId: string, input: { status?: TaskStatus; priority?: number; title?: string; description?: string; estimatedCostCents?: number; summary?: string; agentState?: Task["agentState"]; branchName?: string | null; prUrl?: string | null }) {
+export function updateTask(taskId: string, input: { status?: TaskStatus; priority?: TaskPriority; title?: string; description?: string; estimatedCostCents?: number; summary?: string; agentState?: Task["agentState"]; branchName?: string | null; prUrl?: string | null }) {
   const task = getTask(taskId);
   if (!task) return null;
   const provided = Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
