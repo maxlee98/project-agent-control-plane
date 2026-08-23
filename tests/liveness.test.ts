@@ -3,6 +3,7 @@ import { after, test } from "node:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import Database from "better-sqlite3";
 import { normalizeLocalPath } from "../src/lib/server/paths.ts";
 
 const previousNodeEnv = process.env.NODE_ENV;
@@ -20,6 +21,25 @@ const runtimeDatabase = (await import("../src/lib/server/db.ts")).db;
 const { runCline: runClineFromAnotherServerBoundary } = await import("../src/lib/server/cline.ts?dashboard-boundary");
 
 process.env.DATA_DIR = migrationDir;
+const legacyDatabase = new Database(path.join(migrationDir, "control-plane.db"));
+legacyDatabase.exec(`
+  CREATE TABLE runs (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    status TEXT NOT NULL,
+    session_id TEXT,
+    branch_name TEXT,
+    workspace_path TEXT,
+    progress INTEGER NOT NULL DEFAULT 0,
+    current_activity TEXT NOT NULL DEFAULT 'Queued for dispatch',
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    error TEXT
+  )
+`);
+legacyDatabase.close();
 const migrationDatabase = (await import("../src/lib/server/db.ts?migration-initial")).db;
 const checkoutPath = path.join(os.homedir(), "Documents/Repos/project-agent-control-plane");
 
