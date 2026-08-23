@@ -2,7 +2,7 @@
 
 ## Status
 
-- **Status:** Implementation complete; pending PR review
+- **Status:** Complete; PR #64 open for human review
 - **Owner:** Project Agent Control Plane
 - **Date:** 2026-08-23
 - **Related task or issue:** GitHub Issue #63 — [Record blocked-run reasons and guide unblock continuations](https://github.com/maxlee98/project-agent-control-plane/issues/63)
@@ -124,13 +124,16 @@ blocked task + continue/retry
 - [x] Blocked-run Issue comment implemented
 - [x] Redaction and bounded-output regressions covered
 - [x] Tests, typecheck, build, and diff checks passed
-- [ ] Feature branch and PR handoff verified
+- [x] Feature branch and PR handoff verified
 
 ## Validation results
 
 - Focused checkpoint/live-run suite — passed, 16 tests.
-- `npm test` — passed, 92 tests, 0 failures.
+- `npm test` — passed, 95 tests, 0 failures after merging the current `origin/main` history.
 - `npm run typecheck` — passed.
 - `env NODE_ENV=production npm run build` — passed. Next reported the existing non-fatal NFT tracing
   warning through `next.config.mjs`, `src/lib/server/workspaces.ts`, and the stop route.
 - `git diff --check` — passed.
+- Branch freshness — passed against `main`: ahead=2, behind=0 before PR creation.
+- PR handoff — PR #64, https://github.com/maxlee98/project-agent-control-plane/pull/64, open with base
+  `main`, head `agent/63-record-blocked-run-reasons`, and `Fixes #63` linkage verified remotely.
