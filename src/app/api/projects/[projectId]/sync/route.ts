@@ -1,6 +1,7 @@
 import { listProjectItems, reconcileProjectItemLifecycle, reconcileResolvedTaskStatus, resolveTaskIssue } from "@/lib/server/github";
 import { claimIdempotencyKey, completeIdempotencyKey, getProject, getTaskByIssue, getTasksByProject, touchProject, updateTaskIssue, upsertSyncedTask } from "@/lib/server/repository";
 import { apiError, apiErrorFrom, apiResponse, assertAllowedKeys, getIdempotencyKey, idempotencyResponse, parseJsonBody, requestFingerprint, validateIdentifier } from "@/lib/server/api";
+import { checkLiveReadiness } from "@/lib/server/readiness";
 
 export async function POST(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId: rawProjectId } = await params;
@@ -25,6 +26,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
       const payload = { ok: true, mode: "demo", count: 0, repairedIssues: 0, syncedAt: new Date().toISOString() };
       completeIdempotencyKey(key!, operation, fingerprint, payload, 200);
       return apiResponse(payload);
+    }
+    const readiness = await checkLiveReadiness(project);
+    if (readiness.failure) {
+      const payload = { code: "READINESS_BLOCKED", message: readiness.failure };
+      completeIdempotencyKey(key!, operation, fingerprint, payload, 409);
+      return apiResponse(payload, 409);
     }
     let items = await listProjectItems(project);
     let repairedIssues = 0;

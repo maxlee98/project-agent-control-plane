@@ -6,6 +6,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import type { Project } from "../domain";
 import { createBaselinePullRequest } from "./github";
+import { remoteRepository } from "./readiness";
 function expandHome(value: string) {
   return value.startsWith("~/") ? path.join(os.homedir(), value.slice(2)) : value;
 }
@@ -44,6 +45,8 @@ export async function prepareBaselinePullRequest(project: Project): Promise<Base
   const repositoryPath = await fs.realpath(path.resolve(expandHome(project.localPath)));
   const root = path.resolve((await git(repositoryPath, ["rev-parse", "--show-toplevel"])).stdout.trim());
   if (root !== repositoryPath) throw new Error("The configured checkout must be the repository root.");
+  const origin = (await git(repositoryPath, ["remote", "get-url", "origin"])).stdout;
+  if (remoteRepository(origin)?.toLowerCase() !== project.fullName.toLowerCase()) throw new Error("The checkout origin does not match the configured GitHub repository.");
   const baseBranch = project.defaultBranch.trim() || "main";
   await git(repositoryPath, ["show-ref", "--verify", "--quiet", `refs/remotes/origin/${baseBranch}`]);
 

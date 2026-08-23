@@ -161,14 +161,17 @@ function issueStateForTaskStatus(status: TaskStatus): "open" | "closed" {
 
 function findStatusOption(item: SyncedProjectItem, status: TaskStatus) {
   const aliases = new Set(statusOptionAliases[status].map(normalizedOptionName));
-  const exact = item.statusOptions.find((option) => normalizedOptionName(option.name) === normalizedOptionName("Review"));
-  return status === "human_review" ? exact ?? item.statusOptions.find((option) => aliases.has(normalizedOptionName(option.name))) ?? null : item.statusOptions.find((option) => aliases.has(normalizedOptionName(option.name))) ?? null;
+  const candidates = item.statusOptions.filter((option) => aliases.has(normalizedOptionName(option.name)));
+  return candidates.length === 1 ? candidates[0] : null;
 }
 
-function isMappedStatusOption(value: string | undefined) {
+function isMappedStatusOption(options: StatusOption[], value: string | undefined) {
   if (!value) return false;
   const normalized = normalizedOptionName(value);
-  return Object.values(statusOptionAliases).some((aliases) => aliases.some((alias) => normalizedOptionName(alias) === normalized));
+  const status = statusFromLabel(value);
+  const aliases = new Set(statusOptionAliases[status].map(normalizedOptionName));
+  return options.filter((option) => aliases.has(normalizedOptionName(option.name))).length === 1
+    && aliases.has(normalized);
 }
 
 export async function listProjectItems(project: Project): Promise<SyncedProjectItem[]> {
@@ -273,7 +276,7 @@ export async function listProjectItems(project: Project): Promise<SyncedProjectI
       statusFieldId: statusField?.id ?? null,
       statusOptionId: statusValue?.optionId ?? statusOption?.id ?? null,
       statusOptionName: statusValue?.name ?? statusOption?.name ?? null,
-      statusMapped: isMappedStatusOption(statusValue?.name ?? statusOption?.name),
+      statusMapped: isMappedStatusOption(statusOptions, statusValue?.name ?? statusOption?.name),
       statusOptions,
       issueNumber: item.content.number,
       issueState: item.content.state === "CLOSED" ? "closed" : "open",

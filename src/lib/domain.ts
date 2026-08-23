@@ -58,6 +58,7 @@ export interface ReadinessReport {
     configured: boolean;
     reachable: boolean | null;
     fieldName: string | null;
+    statusFieldIssue?: "missing_status_field" | "ambiguous_status_fields" | null;
     options: string[];
     mappings: ProjectStatusMapping[];
   };

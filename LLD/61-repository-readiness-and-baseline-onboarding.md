@@ -87,6 +87,9 @@ call; no destructive migration is required.
 - 2025-02-14: Treat missing automated checks as a Live blocker while retaining Demo readiness.
 - 2025-02-14: Keep baseline creation as an explicit proposal until the target-PR adapter boundary is
   independently approved; readiness itself remains strictly non-mutating.
+- 2026-08-23: Recovered the prior Issue #61 implementation from its preserved sibling branch after the
+  continuation workspace failed, then tightened status ambiguity handling, Live sync/status gating,
+  baseline origin validation, and dashboard readiness reporting.
 
 ## Open questions and assumptions
 - GitHub Project capability can be represented by an optional adapter response; unavailable access is
@@ -98,26 +101,25 @@ call; no destructive migration is required.
 - [x] Implementation complete
 - [x] Implementation self-review completed
 - [x] Tests and typecheck passed
-- [x] Production build attempted; existing environment fails prerendering `/_global-error` with a
-  React `useContext` null error after compilation, plus existing Next NFT/key warnings.
-- [x] Handoff implementation documented
+- [x] Production build passed
+- [ ] Handoff implementation documented and PR verified
 
 ## Validation results
-- `npm run safe:run -- --timeout-ms 120000 -- npm test` — passed, 91 tests.
-- After adding readiness fixtures, `npm run safe:run -- --timeout-ms 120000 -- npm test` — passed, 94 tests.
+- `npm run safe:run -- --timeout-ms 120000 -- npm test` — passed, 98 tests.
 - The focused readiness tests cover missing checkout, valid Git root, no execution of detected
   validation, default workflow selection, baseline proposal, and safe redaction. GitHub status
   mapping is exposed through the adapter capability method and retains the existing mocked adapter
-  coverage.
-- `npm run safe:run -- --timeout-ms 120000 -- npm run typecheck` — passed.
+  coverage. Additional safeguards reject ambiguous task status options and gate Live sync/status
+  mutations on a fresh readiness assessment.
+- `npm run safe:run -- --timeout-ms 120000 -- npm run typecheck` — passed after installing dependencies.
 - `npm run safe:run -- --timeout-ms 120000 -- git diff --check` — passed.
 - `npm install` was required because dependencies were not present; npm reported existing audit
   vulnerabilities and Node 23 engine warnings. No dependency files were changed.
 - `npm run safe:run -- --timeout-ms 120000 -- npm run build` — compilation and TypeScript passed,
-  but the existing environment failed prerendering `/_global-error` with a React `useContext` null
-  error; it also emitted existing Next NFT/key warnings.
+  static generation passed; Next emitted the existing non-fatal NFT tracing warning for dynamic
+  filesystem access in the workspace/orchestrator route.
 
 ## Handoff status
 The implementation is left on the dedicated feature branch with no remote write or automatic merge.
-Before PR creation, review the baseline PR policy and rerun the required branch-freshness and PR
-template gates. The known production build prerender failure remains a human-review warning.
+Before PR creation, rerun the required branch-freshness and PR-template gates. The existing NFT
+tracing warning remains a human-review warning.

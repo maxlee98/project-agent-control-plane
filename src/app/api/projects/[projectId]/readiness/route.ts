@@ -10,7 +10,8 @@ export async function POST(_request: Request, { params }: { params: Promise<{ pr
     const project = getProject(projectId);
     if (!project) return apiError("PROJECT_NOT_FOUND", "Project not found.", 404);
     const report = await assessProjectReadiness(project);
-    return apiResponse(saveProjectReadiness(project.id, report));
+    const savedProject = saveProjectReadiness(project.id, report);
+    return apiResponse({ readiness: report, project: savedProject });
   } catch (error) {
     return apiErrorFrom(error, "Repository readiness could not be assessed.");
   }

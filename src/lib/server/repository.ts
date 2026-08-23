@@ -267,7 +267,9 @@ export function getDashboard(): DashboardData {
   const activity = db.prepare("SELECT a.* FROM activity a JOIN projects p ON p.id = a.project_id WHERE (? = 'demo' OR p.is_demo = 0) ORDER BY a.created_at DESC LIMIT 40").all(executionMode).map((row) => mapActivity(row as ActivityRow));
   const visibleRunIds = new Set(runs.map((run) => run.id));
   const runEvents = getRunEvents().filter((event) => visibleRunIds.has(event.runId));
-  const liveReady = Boolean(process.env.CLINE_API_KEY && process.env.GITHUB_TOKEN);
+  const credentialsReady = Boolean(process.env.CLINE_API_KEY && process.env.GITHUB_TOKEN);
+  const readinessReady = projects.length > 0 && projects.every((project) => project.readiness?.overallLevel === "live_ready");
+  const liveReady = executionMode === "live" && credentialsReady && readinessReady;
   const capacity = getRunCapacity();
   const activeClaimCount = countActiveRunClaims();
   return {
@@ -281,9 +283,11 @@ export function getDashboard(): DashboardData {
       liveReady,
       reason: executionMode === "demo"
         ? "Demo mode is enabled. Runs are simulated and never touch a repository."
-        : liveReady
-          ? null
-          : "Live mode needs CLINE_API_KEY and GITHUB_TOKEN before it can modify repositories.",
+        : !credentialsReady
+          ? "Live mode needs CLINE_API_KEY and GITHUB_TOKEN before it can modify repositories."
+          : !readinessReady
+            ? "Live mode needs every registered repository to pass a fresh readiness check before it can modify repositories."
+            : null,
       reasoning: getReasoningCapabilitySync(process.env.CLINE_PROVIDER_ID ?? "anthropic", process.env.CLINE_MODEL_ID ?? "claude-sonnet-4-5"),
       capacity: { active: activeClaimCount, ...capacity },
     },

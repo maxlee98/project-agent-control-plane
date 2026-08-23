@@ -10,9 +10,14 @@ import { redactSecrets } from "./redaction";
 const execFile = promisify(execFileCallback);
 const CATEGORY_NAMES: ReadinessCategory[] = ["checkout", "policy", "validation", "github", "runtime", "handoff"];
 const STATUS_CONCEPTS: ProjectStatusConcept[] = ["ready", "in_progress", "review", "blocked", "done"];
+type StatusFieldIssue = "missing_status_field" | "ambiguous_status_fields";
 
 function expandHome(value: string) {
   return value.startsWith("~/") ? path.join(os.homedir(), value.slice(2)) : value;
+}
+
+function configured(value: string | undefined) {
+  return Boolean(value?.trim());
 }
 
 type GitResult = { stdout: string };
@@ -61,7 +66,7 @@ async function directoryHasEntries(directoryPath: string) {
 }
 
 export function remoteRepository(value: string) {
-  const cleaned = value.trim().replace(/\.git$/, "").replace(/\/$/, "");
+  const cleaned = value.trim().replace(/\/+$/, "").replace(/\.git$/, "");
   const match = cleaned.match(/^(?:https?:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/]+\/[^/]+)$/i);
   return match?.[1] ?? null;
 }
@@ -150,12 +155,31 @@ function statusCheckForMappings(mappings: ReadinessReport["projectStatus"]["mapp
     return;
   }
   checks.push(check("github.project", "github", "pass", "The configured GitHub Project is reachable.", "No action needed.", true));
+  if (mappings.length === 0) {
+    checks.push(missingCheck("github.status_field", "github", "The GitHub Project Status field could not be mapped.", "Ensure the project exposes one single-select field named Status, then run readiness again.", true));
+    return;
+  }
   for (const mapping of mappings) {
     const label = mapping.concept === "in_progress" ? "In progress" : mapping.concept[0].toUpperCase() + mapping.concept.slice(1);
     checks.push(mapping.state === "mapped"
       ? check(`github.status.${mapping.concept}`, "github", "pass", `${label} has one canonical Project Status option.`, "No action needed.", true)
       : missingCheck(`github.status.${mapping.concept}`, "github", `${label} does not have one unambiguous canonical Project Status option.`, "Rename or add exactly one matching Status option, then run readiness again.", true));
   }
+}
+
+function statusFieldCheck(projectStatus: ReadinessReport["projectStatus"], checks: ReadinessCheck[]) {
+  if (projectStatus.statusFieldIssue === "missing_status_field") {
+    checks.push(missingCheck("github.status_field", "github", "The GitHub Project has no Status field.", "Add one single-select field named Status, then run readiness again.", true));
+  } else if (projectStatus.statusFieldIssue === "ambiguous_status_fields") {
+    checks.push(missingCheck("github.status_field", "github", "The GitHub Project has ambiguous Status fields.", "Keep exactly one single-select field named Status, then run readiness again.", true));
+  }
+}
+
+function statusFieldIssue(error: unknown): StatusFieldIssue | null {
+  const message = error instanceof Error ? error.message : "";
+  if (message === "GitHub Project has no Status field.") return "missing_status_field";
+  if (message === "GitHub Project has ambiguous Status fields.") return "ambiguous_status_fields";
+  return null;
 }
 
 export async function assessProjectReadiness(project: Project): Promise<ReadinessReport> {
@@ -197,8 +221,8 @@ export async function assessProjectReadiness(project: Project): Promise<Readines
     ? check("validation.commands", "validation", "pass", `${validationCommands} supported validation command${validationCommands === 1 ? "" : "s"} detected without executing it.`, "No action needed.", true)
     : missingCheck("validation.commands", "validation", "No supported validation commands were detected.", "Add an explicit supported test, typecheck, build, or pytest command; readiness does not execute repository scripts.", true));
 
-  const hasClineKey = Boolean(process.env.CLINE_API_KEY);
-  const hasGithubToken = Boolean(process.env.GITHUB_TOKEN);
+  const hasClineKey = configured(process.env.CLINE_API_KEY);
+  const hasGithubToken = configured(process.env.GITHUB_TOKEN);
   checks.push(hasClineKey
     ? check("runtime.cline", "runtime", "pass", "Cline runtime credentials are configured (value withheld).", "No action needed.", true)
     : missingCheck("runtime.cline", "runtime", "Cline runtime credentials are not configured.", "Configure CLINE_API_KEY in the host environment; readiness never returns its value.", true));
@@ -207,22 +231,30 @@ export async function assessProjectReadiness(project: Project): Promise<Readines
     : missingCheck("runtime.github", "runtime", "GitHub host credentials are not configured.", "Configure GITHUB_TOKEN in the host environment; readiness never returns its value.", true));
   checks.push(check("runtime.model", "runtime", "pass", `Cline provider/model configuration is ${process.env.CLINE_PROVIDER_ID && process.env.CLINE_MODEL_ID ? "explicit" : "using safe defaults"}.`, "No action needed unless a repository requires a specific provider/model.", true));
 
-  let projectStatus: ReadinessReport["projectStatus"] = { configured: Boolean(project.githubProjectId), reachable: null, fieldName: null, options: [], mappings: STATUS_CONCEPTS.map((concept) => ({ concept, optionId: null, optionName: null, state: "unavailable", candidates: [] })) };
+  let projectStatus: ReadinessReport["projectStatus"] = { configured: Boolean(project.githubProjectId), reachable: null, fieldName: null, statusFieldIssue: null, options: [], mappings: STATUS_CONCEPTS.map((concept) => ({ concept, optionId: null, optionName: null, state: "unavailable", candidates: [] })) };
   if (project.githubProjectId && hasGithubToken) {
     try {
       const capability = await inspectProjectStatus(project);
-      projectStatus = { configured: true, reachable: true, fieldName: capability.fieldName, options: capability.options, mappings: capability.mappings };
-    } catch {
-      projectStatus = { ...projectStatus, reachable: false };
+      projectStatus = { configured: true, reachable: true, fieldName: capability.fieldName, statusFieldIssue: null, options: capability.options, mappings: capability.mappings };
+    } catch (error) {
+      const issue = statusFieldIssue(error);
+      projectStatus = {
+        ...projectStatus,
+        reachable: issue ? true : false,
+        statusFieldIssue: issue,
+        mappings: issue
+          ? STATUS_CONCEPTS.map((concept) => ({ concept, optionId: null, optionName: null, state: issue === "ambiguous_status_fields" ? "ambiguous" : "missing", candidates: [] }))
+          : projectStatus.mappings,
+      };
     }
   }
   statusCheckForMappings(projectStatus.mappings, projectStatus.configured, projectStatus.reachable, checks);
+  statusFieldCheck(projectStatus, checks);
 
   const categories = addCategoryCounts(checks);
-  const checkoutReady = !checks.some((item) => item.category === "checkout" && item.status === "blocker");
-  const liveReady = checkoutReady && checks.every((item) => !item.liveRequired || item.status === "pass");
-  const liveOnlyFailures = checks.filter((item) => item.status !== "pass").every((item) => item.liveRequired);
-  const overallLevel = liveReady ? "live_ready" : checkoutReady && liveOnlyFailures ? "demo_ready" : repositoryPath ? "inspectable" : "registered";
+  const checkoutRootReady = Boolean(repositoryPath && checks.some((item) => item.id === "checkout.git_root" && item.status === "pass"));
+  const liveReady = checkoutRootReady && checks.every((item) => !item.liveRequired || item.status === "pass");
+  const overallLevel = liveReady ? "live_ready" : checkoutRootReady ? "demo_ready" : repositoryPath ? "inspectable" : "registered";
   return {
     contractVersion: READINESS_CONTRACT_VERSION,
     checkedAt: new Date().toISOString(),
