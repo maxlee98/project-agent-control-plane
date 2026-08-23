@@ -1,4 +1,4 @@
-import type { AgentRun, Project, Task, TaskStatus } from "../domain";
+import { DEFAULT_TASK_PRIORITY, priorityFromLabel, priorityLabel, type AgentRun, type Project, type Task, type TaskPriority, type TaskStatus } from "../domain";
 import { normalizePrTitle } from "../pr-title";
 
 function githubRequest(path: string, init: RequestInit = {}) {
@@ -80,6 +80,12 @@ export type SyncedProjectItem = {
   statusOptionName: string | null;
   statusMapped: boolean;
   statusOptions: StatusOption[];
+  priorityFieldId: string | null;
+  priorityOptionId: string | null;
+  priorityOptionName: string | null;
+  priorityOptions: StatusOption[];
+  priority: TaskPriority;
+  priorityWasMissing: boolean;
   issueNumber: number;
   issueState: "open" | "closed";
   title: string;
@@ -88,6 +94,20 @@ export type SyncedProjectItem = {
   labels: string[];
   githubUrl: string | null;
 };
+
+type ProjectField = { id: string; name?: string; options?: StatusOption[] };
+
+function requiredPriorityOptions(field: ProjectField | undefined) {
+  if (!field) throw new Error("GitHub Projects V2 has no usable Priority field. Create a single-select Priority field with P0, P1, P2, and P3 options.");
+  const options = field.options ?? [];
+  const matches = ["P0", "P1", "P2", "P3"].map((name) => options.filter((option) => option.name.trim().toUpperCase() === name));
+  if (matches.some((values) => values.length !== 1)) throw new Error("GitHub Projects V2 Priority field must contain exactly one option for each of P0, P1, P2, and P3.");
+  return matches.map((values) => values[0]!);
+}
+
+function priorityOption(field: ProjectField | undefined, priority: TaskPriority) {
+  return requiredPriorityOptions(field)[priority - 1]!;
+}
 
 const statusOptionAliases: Record<TaskStatus, string[]> = {
   inbox: ["inbox", "backlog", "todo"],
@@ -146,6 +166,7 @@ export async function listProjectItems(project: Project): Promise<SyncedProjectI
   const items: ProjectItem[] = [];
   let cursor: string | null = null;
   let statusField: ProjectField | undefined;
+  let priorityField: ProjectField | undefined;
   do {
     const data: ProjectData = await graphql<ProjectData>(`query ProjectItems($id: ID!, $after: String) {
       node(id: $id) {
@@ -184,7 +205,7 @@ export async function listProjectItems(project: Project): Promise<SyncedProjectI
                   repository { nameWithOwner }
                 }
               }
-              fieldValues(first: 20) {
+            fieldValues(first: 20) {
                 nodes {
                   __typename
                   ... on ProjectV2ItemFieldSingleSelectValue {
@@ -203,17 +224,22 @@ export async function listProjectItems(project: Project): Promise<SyncedProjectI
     if (!data.node) throw new Error(`GitHub Projects V2 project '${project.githubProjectId}' was not found or is not accessible to the configured token.`);
     if (data.node.__typename !== "ProjectV2") throw new Error(`GitHub node '${project.githubProjectId}' is not a Projects V2 project.`);
     statusField ??= data.node.fields.nodes.find((field: ProjectField) => field.name?.toLowerCase() === "status");
+    priorityField ??= data.node.fields.nodes.find((field: ProjectField) => field.name?.toLowerCase() === "priority");
     items.push(...data.node.items.nodes);
     cursor = data.node.items.pageInfo.hasNextPage ? data.node.items.pageInfo.endCursor : null;
     if (data.node.items.pageInfo.hasNextPage && !cursor) throw new Error("GitHub Projects V2 returned a page without a cursor.");
   } while (cursor);
   if (!statusField) throw new Error(`GitHub Projects V2 project '${project.githubProjectId}' has no usable Status field.`);
+  const resolvedPriorityField = priorityField;
+  if (!resolvedPriorityField) throw new Error("GitHub Projects V2 has no usable Priority field. Create a single-select Priority field with P0, P1, P2, and P3 options.");
+  requiredPriorityOptions(resolvedPriorityField);
   return items.flatMap((item) => {
     if (!item.content || item.content.__typename !== "Issue" || !item.content.number) return [];
     if (item.content.repository?.nameWithOwner !== project.fullName) return [];
     const statusValue = item.fieldValues.nodes.find((value) => value.field?.id === statusField?.id);
     const statusOptions = statusField?.options ?? [];
     const statusOption = statusOptions.find((option) => option.id === statusValue?.optionId || option.name === statusValue?.name);
+    const priorityValue = item.fieldValues.nodes.find((value) => value.field?.id === resolvedPriorityField.id || priorityFromLabel(value.name) !== null);
     return [{
       projectItemId: item.id,
       contentNodeId: item.content.id ?? null,
@@ -222,7 +248,13 @@ export async function listProjectItems(project: Project): Promise<SyncedProjectI
       statusOptionName: statusValue?.name ?? statusOption?.name ?? null,
       statusMapped: isMappedStatusOption(statusValue?.name ?? statusOption?.name),
       statusOptions,
+      priorityFieldId: resolvedPriorityField.id,
+      priorityOptionId: priorityValue?.optionId ?? null,
+      priorityOptionName: priorityValue?.name ?? null,
+      priorityOptions: resolvedPriorityField.options ?? [],
       issueNumber: item.content.number,
+      priority: priorityFromLabel(priorityValue?.name) ?? DEFAULT_TASK_PRIORITY,
+      priorityWasMissing: !priorityValue,
       issueState: item.content.state === "CLOSED" ? "closed" : "open",
       title: item.content.title ?? "Untitled issue",
       description: item.content.body ?? "",
@@ -269,6 +301,19 @@ async function updateProjectItemStatus(project: Project, item: SyncedProjectItem
   return true;
 }
 
+async function updateProjectItemPriority(project: Project, item: SyncedProjectItem, priority: TaskPriority) {
+  if (!project.githubProjectId || !item.priorityFieldId) throw new Error("GitHub Projects V2 has no usable Priority field for this item.");
+  const option = priorityOption({ id: item.priorityFieldId, name: "Priority", options: item.priorityOptions }, priority);
+  if (item.priorityOptionId === option.id) return false;
+  await graphql(`mutation($projectId:ID!, $itemId:ID!, $fieldId:ID!, $optionId:String!) { updateProjectV2ItemFieldValue(input:{ projectId:$projectId, itemId:$itemId, fieldId:$fieldId, value:{ singleSelectOptionId:$optionId } }) { projectV2Item { id } } }`, {
+    projectId: project.githubProjectId,
+    itemId: item.projectItemId,
+    fieldId: item.priorityFieldId,
+    optionId: option.id,
+  });
+  return true;
+}
+
 async function updateIssueState(fullName: string, issueNumber: number, state: "open" | "closed") {
   const { owner, repo } = repoParts(fullName);
   const current = await readResponse(await githubRequest(`/repos/${owner}/${repo}/issues/${issueNumber}`));
@@ -287,12 +332,14 @@ export async function reconcileProjectItemLifecycle(project: Project, item: Sync
   return { issueChanged };
 }
 
-async function applyTaskStatus(project: Project, resolved: { issue: ResolvedIssue; created: boolean }, status: TaskStatus, originalTask?: Pick<Task, "issueNumber" | "githubUrl">) {
+async function applyTaskStatus(project: Project, resolved: { issue: ResolvedIssue; created: boolean }, status: TaskStatus, priority: TaskPriority, originalTask?: Pick<Task, "issueNumber" | "githubUrl">) {
   const ensured = await ensureProjectItem(project, resolved.issue);
   const projectChanged = await updateProjectItemStatus(project, ensured.item, status);
+  const priorityChanged = await updateProjectItemPriority(project, ensured.item, priority);
   const issueChanged = await updateIssueState(project.fullName, resolved.issue.number, issueStateForTaskStatus(status));
   return {
     projectChanged,
+    priorityChanged,
     issueChanged,
     issueNumber: resolved.issue.number,
     githubUrl: resolved.issue.url,
@@ -302,12 +349,12 @@ async function applyTaskStatus(project: Project, resolved: { issue: ResolvedIssu
   };
 }
 
-export async function reconcileTaskStatus(project: Project, task: Pick<Task, "issueNumber" | "title" | "description" | "githubUrl">, status: TaskStatus) {
-  return applyTaskStatus(project, await resolveTaskIssue(project, task), status, task);
+export async function reconcileTaskStatus(project: Project, task: Pick<Task, "issueNumber" | "title" | "description" | "githubUrl"> & { priority?: TaskPriority }, status: TaskStatus) {
+  return applyTaskStatus(project, await resolveTaskIssue(project, task), status, task.priority ?? DEFAULT_TASK_PRIORITY, task);
 }
 
-export async function reconcileResolvedTaskStatus(project: Project, issue: ResolvedIssue, status: TaskStatus) {
-  return applyTaskStatus(project, { issue, created: false }, status);
+export async function reconcileResolvedTaskStatus(project: Project, issue: ResolvedIssue, status: TaskStatus, priority: TaskPriority = DEFAULT_TASK_PRIORITY) {
+  return applyTaskStatus(project, { issue, created: false }, status, priority);
 }
 
 export async function createPullRequest(fullName: string, task: Task, run: AgentRun) {
@@ -343,9 +390,10 @@ export async function publishComment(fullName: string, issueNumber: number, body
   await readResponse(await githubRequest(`/repos/${owner}/${repo}/issues/${issueNumber}/comments`, { method: "POST", body: JSON.stringify({ body }) }));
 }
 
-export async function createIssue(fullName: string, title: string, body: string): Promise<CreatedIssue> {
+export async function createIssue(fullName: string, title: string, body: string, priority: TaskPriority = DEFAULT_TASK_PRIORITY): Promise<CreatedIssue> {
   const { owner, repo } = repoParts(fullName);
-  const result = await readResponse(await githubRequest(`/repos/${owner}/${repo}/issues`, { method: "POST", body: JSON.stringify({ title, body }) }));
+  const issueBody = `Priority: ${priorityLabel(priority)}\n\n${body.trim()}`;
+  const result = await readResponse(await githubRequest(`/repos/${owner}/${repo}/issues`, { method: "POST", body: JSON.stringify({ title, body: issueBody }) }));
   const nodeId = String(result.node_id ?? "");
   if (!nodeId) throw new Error("GitHub created the Issue but did not return its node ID for Projects V2 insertion.");
   const number = Number(result.number);
@@ -389,13 +437,13 @@ async function findIssueByTitle(fullName: string, title: string): Promise<Resolv
   return null;
 }
 
-export async function resolveTaskIssue(project: Project, task: Pick<Task, "issueNumber" | "title" | "description" | "githubUrl">) {
+export async function resolveTaskIssue(project: Project, task: Pick<Task, "issueNumber" | "title" | "description" | "githubUrl"> & { priority?: TaskPriority }) {
   const numberedIssue = task.issueNumber ? await getIssueByNumber(project.fullName, task.issueNumber) : null;
   const numberedIssueMatches = numberedIssue
     && (task.githubUrl === numberedIssue.url || normalizedIssueTitle(task.title) === normalizedIssueTitle(numberedIssue.title));
   const issue = numberedIssueMatches ? numberedIssue : await findIssueByTitle(project.fullName, task.title);
   if (issue) return { issue, created: false };
-  const created = await createIssue(project.fullName, task.title, task.description);
+  const created = await createIssue(project.fullName, task.title, task.description, task.priority ?? DEFAULT_TASK_PRIORITY);
   return {
     issue: { ...created, title: task.title, body: task.description, state: "open" as const },
     created: true,

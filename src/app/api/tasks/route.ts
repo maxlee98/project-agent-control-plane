@@ -2,7 +2,7 @@ import { createIssue, reconcileTaskStatus } from "@/lib/server/github";
 import { claimIdempotencyKey, completeIdempotencyKey, createTask, getProject } from "@/lib/server/repository";
 import { parseEstimatedCostCents } from "@/lib/server/cost";
 import { API_LIMITS, apiError, apiErrorFrom, apiResponse, assertAllowedKeys, getIdempotencyKey, idempotencyResponse, optionalEnum, optionalInteger, optionalString, optionalStringArray, parseJsonBody, requestFingerprint, requiredString, validateIdentifier } from "@/lib/server/api";
-import { BOARD_COLUMNS, type TaskStatus } from "@/lib/domain";
+import { BOARD_COLUMNS, DEFAULT_TASK_PRIORITY, type TaskPriority, type TaskStatus } from "@/lib/domain";
 
 export async function POST(request: Request) {
   let key: string | null = null;
@@ -16,7 +16,7 @@ export async function POST(request: Request) {
     const description = optionalString(body, "description", API_LIMITS.taskDescription);
     const taskStatuses = BOARD_COLUMNS.map((column) => column.id) as readonly TaskStatus[];
     const status = optionalEnum(body, "status", taskStatuses) ?? "inbox";
-    const priority = optionalInteger(body, "priority", 1, 4);
+    const priority = (optionalInteger(body, "priority", 1, 4) ?? DEFAULT_TASK_PRIORITY) as TaskPriority;
     const labels = optionalStringArray(body, "labels", API_LIMITS.labels, API_LIMITS.label);
     const estimatedCostCents = parseEstimatedCostCents(body.estimatedCostUsd);
     if (estimatedCostCents === null || estimatedCostCents > API_LIMITS.estimatedCostCents) throw new Error("invalid cost");
@@ -31,10 +31,10 @@ export async function POST(request: Request) {
     let syncWarning: string | null = null;
     try {
       if (process.env.EXECUTION_MODE === "live") {
-        issue = await createIssue(project.fullName, title, description ?? "");
+        issue = await createIssue(project.fullName, title, description ?? "", priority);
         if (!project.githubProjectId) syncWarning = "GitHub Issue created, but this repository has no Projects V2 ID configured.";
         else {
-          try { remoteSync = await reconcileTaskStatus(project, { issueNumber: issue.number, title, description: description ?? "", githubUrl: issue.url }, status); }
+          try { remoteSync = await reconcileTaskStatus(project, { issueNumber: issue.number, title, description: description ?? "", githubUrl: issue.url, priority }, status); }
           catch { syncWarning = "GitHub Issue created, but Projects V2 synchronization needs retry."; }
         }
       }
