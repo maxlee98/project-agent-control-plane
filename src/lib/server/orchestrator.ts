@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { addActivity, addRunEvent, createRun, finishRunAndTask, getProject, getRun, getTask, stopRunAndReleaseClaim, updateRun, updateTask } from "./repository";
+import { addActivity, addRunEvent, createRun, finishRunAndTask, getLatestFailedRun, getProject, getRun, getTask, stopRunAndReleaseClaim, updateRun, updateTask } from "./repository";
 import { createPullRequest, publishComment, reconcileTaskStatus } from "./github";
 import { runCline, stopClineRun } from "./cline";
 import { IssueCheckpointPublisher } from "./issue-checkpoints";
@@ -77,6 +77,11 @@ function safeErrorMessage(error: unknown) {
   return redactSecrets(message) || "Live agent failed unexpectedly.";
 }
 
+function boundedRedacted(value: string | null | undefined, limit: number) {
+  const redacted = redactSecrets(value?.trim()) ?? "";
+  return redacted.length > limit ? `${redacted.slice(0, limit)}…` : redacted;
+}
+
 function stageFailureMessage(stage: LiveRunStage, error: unknown) {
   return `Live run failed during ${stage}: ${safeErrorMessage(error)}`;
 }
@@ -91,13 +96,16 @@ function assertRunNotStopped(runId: string) {
   if (status === "failed" || status === "completed") throw new Error("Run is no longer active.");
 }
 
-async function buildPrompt(projectPath: string, task: ReturnType<typeof getTask>) {
+async function buildPrompt(projectPath: string, task: ReturnType<typeof getTask>, mode: AgentRun["mode"], sourceRun: AgentRun | null) {
   if (!task) return "";
   const workflowPath = path.join(projectPath, "WORKFLOW.md");
   const defaultWorkflow = path.resolve(process.cwd(), "workflows/default/WORKFLOW.md");
   let workflow = "";
   try { workflow = await fs.readFile(workflowPath, "utf8"); } catch { workflow = await fs.readFile(defaultWorkflow, "utf8"); }
-  return `${workflow}\n\n## Assigned task\nTitle: ${task.title}\n\nDescription:\n${task.description || "No description provided."}\n\nLatest context:\n${task.currentSummary}\n\nWork in the assigned isolated workspace. Make the change, validate it, and leave a concise handoff.`;
+  const recoveryContext = sourceRun?.status === "failed"
+    ? `\n\n## Recovery context\nPrevious run: ${sourceRun.id}\nPrevious failure:\n${boundedRedacted(sourceRun.error ?? sourceRun.currentActivity, 2_000)}\n\nTreat the previous run failure as a blocker to diagnose. Inspect the ${mode === "continue" ? "preserved workspace and " : "current workspace and "}repository state, find a safe way to unblock the task, and do not blindly repeat the failed approach. If a human decision, credential, or external change is required, explain exactly what is needed in the handoff.`
+    : "";
+  return `${workflow}\n\n## Assigned task\nTitle: ${task.title}\n\nDescription:\n${task.description || "No description provided."}\n\nLatest context:\n${task.currentSummary}${recoveryContext}\n\nWork in the assigned isolated workspace. Make the change, validate it, and leave a concise handoff.`;
 }
 
 function persistRunEvent(runId: string, event: RunEventDraft) {
@@ -162,7 +170,7 @@ export async function executeLiveRun(runId: string, taskId: string, sourceRunId?
     updateTask(task.id, { branchName: workspace.branchName, summary: "Cline is working inside an isolated worktree." });
     addRunEvent(runId, workspace.reused ? "workspace_reused" : "workspace_created", workspace.reused ? "Existing isolated worktree resumed" : "Fresh isolated worktree created", workspace.workspacePath);
     await checkpoints?.checkpoint({ phase: "workspace", progress: 12 }, { force: true });
-    const prompt = await buildPrompt(expandHome(project.localPath), task);
+    const prompt = await buildPrompt(expandHome(project.localPath), task, run.mode, sourceRun);
     assertRunNotStopped(runId);
     enterStage("cline", "Starting the Cline session and executing the task turn.");
     const result = await dependencies.runCline({ runId, task, project, prompt, workspacePath: workspace.workspacePath, providerId: run.providerId, modelId: run.modelId, reasoningEffort: run.reasoningEffort }, {
@@ -222,7 +230,10 @@ export async function executeLiveRun(runId: string, taskId: string, sourceRunId?
     addRunEvent(runId, "stage_failed", `Live run stage failed: ${stage}`, safeErrorMessage(error));
     addRunEvent(runId, "run_failed", "Live run failed", message);
     addActivity({ projectId: project.id, taskId: task.id, runId, type: "run_failed", title: "Live run failed", detail: message, tone: "red" });
-    await checkpoints?.checkpoint({ phase: "failed" }, { force: true });
+    await checkpoints?.checkpoint({
+      phase: "failed",
+      detail: `Stage: ${stage}\nReason: ${boundedRedacted(safeErrorMessage(error), 1_700)}`,
+    }, { force: true });
   } finally {
     checkpoints?.stop();
   }
@@ -261,17 +272,21 @@ function schedule(runId: string, taskId: string, mode: AgentRun["mode"]) {
   activeRuns.set(runId, timers);
 }
 
-export function startAgentRun(taskId: string, mode: AgentRun["mode"] = "start", sourceRunId?: string, reasoningEffort?: AgentRun["reasoningEffort"]) {
+export function startAgentRun(taskId: string, mode: AgentRun["mode"] = "start", sourceRunId?: string, reasoningEffort?: AgentRun["reasoningEffort"], dependencies: LiveRunDependencies = liveRunDependencies) {
   const task = getTask(taskId);
   if (!task) return null;
   if (process.env.EXECUTION_MODE === "live") {
     const prerequisiteError = livePrerequisiteError();
     if (prerequisiteError) return { error: prerequisiteError } as const;
   }
-  const sourceRun = sourceRunId ? getRun(sourceRunId) : null;
+  const sourceRun = sourceRunId
+    ? getRun(sourceRunId)
+    : mode === "start" && task.status === "blocked"
+      ? getLatestFailedRun(task.id)
+      : null;
   const run = createRun({ taskId, mode, reasoningEffort: reasoningEffort === undefined ? sourceRun?.reasoningEffort ?? null : reasoningEffort });
   if (!run) return null;
-  if (run.executionMode === "live") void executeLiveRun(run.id, taskId, sourceRunId);
+  if (run.executionMode === "live") void executeLiveRun(run.id, taskId, sourceRun?.id, dependencies);
   else schedule(run.id, taskId, mode);
   return run;
 }
