@@ -16,6 +16,20 @@ test("formats a concise checkpoint without forwarding raw agent output", () => {
   assert.doesNotMatch(body, /tool|token|environment|prompt/i);
 });
 
+test("formats a bounded blocked reason with recovery guidance and redaction", () => {
+  const body = formatIssueCheckpoint("run-blocked", {
+    phase: "failed",
+    detail: `Stage: cline\nReason: provider failed ${"x".repeat(3_000)} token=unsafe-value`,
+  });
+
+  assert.match(body, /Status: Agent run is blocked because it failed before handoff\./);
+  assert.match(body, /Blocked reason: Stage: cline/);
+  assert.match(body, /Next step: Inspect the preserved workspace/);
+  assert.doesNotMatch(body, /token=unsafe-value/);
+  assert.match(body, /…/);
+  assert.ok(body.length < 2_500);
+});
+
 test("throttles ordinary progress and publishes the latest checkpoint", async () => {
   let now = 1_000;
   const bodies: string[] = [];

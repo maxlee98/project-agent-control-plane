@@ -1,3 +1,5 @@
+import { redactSecrets } from "./redaction";
+
 export type IssueCheckpointPhase = "started" | "workspace" | "progress" | "validation" | "handoff" | "failed";
 
 export type IssueCheckpoint = {
@@ -24,8 +26,15 @@ const phaseStatus: Record<IssueCheckpointPhase, string> = {
   progress: "Agent is actively working in the isolated worktree.",
   validation: "Agent is running repository validation.",
   handoff: "Pull request handoff is ready for human review.",
-  failed: "Agent run failed before handoff. See the control-plane run history for details.",
+  failed: "Agent run is blocked because it failed before handoff.",
 };
+
+const MAX_CHECKPOINT_DETAIL_LENGTH = 2_000;
+
+function safeDetail(value: string | undefined) {
+  const redacted = redactSecrets(value?.trim()) ?? "";
+  return redacted.length > MAX_CHECKPOINT_DETAIL_LENGTH ? `${redacted.slice(0, MAX_CHECKPOINT_DETAIL_LENGTH)}…` : redacted;
+}
 
 export function formatIssueCheckpoint(runId: string, checkpoint: IssueCheckpoint) {
   const lines = [
@@ -35,7 +44,11 @@ export function formatIssueCheckpoint(runId: string, checkpoint: IssueCheckpoint
     `Status: ${phaseStatus[checkpoint.phase]}`,
   ];
   if (typeof checkpoint.progress === "number") lines.push(`Progress: ${Math.max(0, Math.min(100, Math.round(checkpoint.progress)))}%`);
-  if (checkpoint.detail?.trim()) lines.push(`Detail: ${checkpoint.detail.trim()}`);
+  const detail = safeDetail(checkpoint.detail);
+  if (detail) lines.push(`${checkpoint.phase === "failed" ? "Blocked reason" : "Detail"}: ${detail}`);
+  if (checkpoint.phase === "failed") {
+    lines.push("", "Next step: Inspect the preserved workspace and resolve the blocker before rerunning the agent. If human input or an external change is required, add it to the Issue.");
+  }
   return lines.join("\n");
 }
 

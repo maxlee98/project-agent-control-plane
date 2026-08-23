@@ -226,6 +226,11 @@ export function getRun(runId: string) {
   return row ? mapRun(row as RunRow) : null;
 }
 
+export function getLatestFailedRun(taskId: string) {
+  const row = db.prepare("SELECT * FROM runs WHERE task_id = ? AND status = 'failed' ORDER BY COALESCE(finished_at, started_at) DESC LIMIT 1").get(taskId);
+  return row ? mapRun(row as RunRow) : null;
+}
+
 export function getProject(projectId: string) {
   const row = db.prepare("SELECT * FROM projects WHERE id = ?").get(projectId);
   return row ? mapProject(row as ProjectRow) : null;
