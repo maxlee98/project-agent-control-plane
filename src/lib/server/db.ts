@@ -127,9 +127,6 @@ function createDatabase() {
     CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status);
     CREATE INDEX IF NOT EXISTS idx_runs_task ON runs(task_id, started_at DESC);
     CREATE INDEX IF NOT EXISTS idx_activity_created ON activity(created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_active_run_claims_project ON active_run_claims(project_id, execution_mode);
-    CREATE INDEX IF NOT EXISTS idx_active_run_claims_lease ON active_run_claims(lease_expires_at);
-    CREATE INDEX IF NOT EXISTS idx_runs_lease ON runs(status, lease_expires_at);
     CREATE INDEX IF NOT EXISTS idx_request_deduplication_operation ON request_deduplication(operation);
   `);
 
@@ -163,6 +160,14 @@ function createDatabase() {
 
   const projectColumns = database.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>;
   if (!new Set(projectColumns.map((column) => column.name)).has("is_demo")) database.exec("ALTER TABLE projects ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0");
+
+  // Lease indexes must be created after legacy databases have received their
+  // additive columns. CREATE TABLE IF NOT EXISTS does not alter an existing table.
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_active_run_claims_project ON active_run_claims(project_id, execution_mode);
+    CREATE INDEX IF NOT EXISTS idx_active_run_claims_lease ON active_run_claims(lease_expires_at);
+    CREATE INDEX IF NOT EXISTS idx_runs_lease ON runs(status, lease_expires_at);
+  `);
 
   seedDatabase(database);
   reconcileProjects(database);
