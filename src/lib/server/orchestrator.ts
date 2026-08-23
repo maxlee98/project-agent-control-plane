@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { addActivity, addRunEvent, createRun, finishRunAndTask, getLatestFailedRun, getProject, getRun, getTask, stopRunAndReleaseClaim, updateRun, updateTask } from "./repository";
+import { addActivity, addRunEvent, createRun, finishRunAndTask, getLatestFailedRun, getProject, getRun, getRunLeaseIntervalMs, getRunOwnerId, getTask, recoverExpiredRunClaims, renewRunLease, stopRunAndReleaseClaim, updateRun, updateRunStage, updateTask } from "./repository";
 import { createPullRequest, publishComment, reconcileTaskStatus } from "./github";
 import { runCline, stopClineRun } from "./cline";
 import { IssueCheckpointPublisher } from "./issue-checkpoints";
@@ -33,7 +33,7 @@ function livePrerequisiteError() {
   return null;
 }
 
-function persistRunUsage(runId: string, usage: RunUsageSnapshot) {
+function persistRunUsage(runId: string, usage: RunUsageSnapshot, ownerId?: string) {
   updateRun(runId, {
     providerId: usage.providerId,
     modelId: usage.modelId,
@@ -43,10 +43,12 @@ function persistRunUsage(runId: string, usage: RunUsageSnapshot) {
     cacheWriteTokens: usage.cacheWriteTokens,
     actualCostUsd: usage.actualCostUsd,
     costSource: usage.costSource,
-  });
+  }, ownerId ? { ownerId } : undefined);
 }
 
 export type LiveRunStage = "configuration" | "workspace" | "cline" | "validation" | "git_handoff" | "pull_request" | "issue_update";
+
+export const recoverStaleRuns = recoverExpiredRunClaims;
 
 export interface LiveRunDependencies {
   runCline: typeof runCline;
@@ -91,9 +93,11 @@ function safeChecks(checks: ReturnType<typeof runChecks> extends Promise<infer R
 }
 
 function assertRunNotStopped(runId: string) {
-  const status = getRun(runId)?.status;
+  const run = getRun(runId);
+  const status = run?.status;
   if (status === "stopped") throw new Error("Run stopped by operator.");
   if (status === "failed" || status === "completed") throw new Error("Run is no longer active.");
+  if (run?.executionMode === "live" && !renewRunLease(runId, getRunOwnerId())) throw new Error("Live run lease is no longer owned by this worker.");
 }
 
 async function buildPrompt(projectPath: string, task: ReturnType<typeof getTask>, mode: AgentRun["mode"], sourceRun: AgentRun | null) {
@@ -118,6 +122,7 @@ export async function executeLiveRun(runId: string, taskId: string, sourceRunId?
   let stage: LiveRunStage = "configuration";
   const enterStage = (next: LiveRunStage, detail: string) => {
     stage = next;
+    updateRunStage(runId, next, getRunOwnerId());
     addRunEvent(runId, "stage_started", `Live run stage started: ${next}`, detail);
   };
   if (!task || !project) {
@@ -130,6 +135,10 @@ export async function executeLiveRun(runId: string, taskId: string, sourceRunId?
     return;
   }
   let workspace: WorkspaceHandle | undefined;
+  const ownerId = getRunOwnerId();
+  const leaseTimer = setInterval(() => {
+    if (!renewRunLease(runId, ownerId)) clearInterval(leaseTimer);
+  }, getRunLeaseIntervalMs());
   const checkpoints = task.issueNumber ? new IssueCheckpointPublisher({
     fullName: project.fullName,
     issueNumber: task.issueNumber,
@@ -148,11 +157,12 @@ export async function executeLiveRun(runId: string, taskId: string, sourceRunId?
     },
   }) : null;
   try {
+    if (!renewRunLease(runId, ownerId)) throw new Error("Live run lease is no longer owned by this worker.");
     await checkpoints?.checkpoint({ phase: "started" }, { force: true });
     checkpoints?.startHeartbeat();
     assertRunNotStopped(runId);
     enterStage("configuration", "Validating the task, project, and live-run prerequisites.");
-    updateRun(runId, { status: "running", progress: 4, currentActivity: "Validating the local checkout" });
+    updateRun(runId, { status: "running", progress: 4, currentActivity: "Validating the local checkout" }, { ownerId });
     addRunEvent(runId, "dispatch", "Live run dispatched", "Preparing an isolated Git worktree.");
     const run = getRun(runId);
     const sourceRun = sourceRunId ? getRun(sourceRunId) : null;
@@ -166,7 +176,7 @@ export async function executeLiveRun(runId: string, taskId: string, sourceRunId?
     enterStage("workspace", "Preparing an isolated Git worktree.");
     workspace = await dependencies.prepareWorkspace(project, task, { runId, mode: run.mode, continuationWorkspacePath: sourceRun?.workspacePath });
     assertRunNotStopped(runId);
-    updateRun(runId, { progress: 12, branchName: workspace.branchName, workspacePath: workspace.workspacePath, currentActivity: workspace.reused ? "Existing worktree resumed" : "Fresh isolated worktree ready" });
+    updateRun(runId, { progress: 12, branchName: workspace.branchName, workspacePath: workspace.workspacePath, currentActivity: workspace.reused ? "Existing worktree resumed" : "Fresh isolated worktree ready" }, { ownerId });
     updateTask(task.id, { branchName: workspace.branchName, summary: "Cline is working inside an isolated worktree." });
     addRunEvent(runId, workspace.reused ? "workspace_reused" : "workspace_created", workspace.reused ? "Existing isolated worktree resumed" : "Fresh isolated worktree created", workspace.workspacePath);
     await checkpoints?.checkpoint({ phase: "workspace", progress: 12 }, { force: true });
@@ -174,22 +184,23 @@ export async function executeLiveRun(runId: string, taskId: string, sourceRunId?
     assertRunNotStopped(runId);
     enterStage("cline", "Starting the Cline session and executing the task turn.");
     const result = await dependencies.runCline({ runId, task, project, prompt, workspacePath: workspace.workspacePath, providerId: run.providerId, modelId: run.modelId, reasoningEffort: run.reasoningEffort }, {
-      onActivity: (message, detail) => { const safeMessage = redactSecrets(message) ?? "Cline activity"; updateRun(runId, { progress: Math.min(68, 15 + Math.floor(Math.random() * 30)), currentActivity: safeMessage }); void checkpoints?.checkpoint({ phase: "progress" }); },
-      onEvent: (event) => persistRunEvent(runId, event),
-      onUsage: (usage) => persistRunUsage(runId, usage),
+      onActivity: (message, detail) => { const safeMessage = redactSecrets(message) ?? "Cline activity"; renewRunLease(runId, ownerId); updateRun(runId, { progress: Math.min(68, 15 + Math.floor(Math.random() * 30)), currentActivity: safeMessage }, { ownerId }); void checkpoints?.checkpoint({ phase: "progress" }); },
+      onEvent: (event) => { renewRunLease(runId, ownerId); persistRunEvent(runId, event); },
+      onHeartbeat: () => { renewRunLease(runId, ownerId); },
+      onUsage: (usage) => persistRunUsage(runId, usage, ownerId),
     });
     assertRunNotStopped(runId);
     if (result.finishReason !== "completed") throw new Error(`Cline run did not complete successfully (finish reason: ${result.finishReason}).`);
-    if (result.usage) persistRunUsage(runId, result.usage);
-    else updateRun(runId, { costSource: "unavailable" });
-    updateRun(runId, { sessionId: result.sessionId, progress: 72, currentActivity: "Running repository validation" });
+    if (result.usage) persistRunUsage(runId, result.usage, ownerId);
+    else updateRun(runId, { costSource: "unavailable" }, { ownerId });
+    updateRun(runId, { sessionId: result.sessionId, progress: 72, currentActivity: "Running repository validation" }, { ownerId });
     enterStage("validation", "Detecting and running repository validation checks.");
     const checks = await dependencies.detectChecks(workspace.workspacePath);
     assertRunNotStopped(runId);
     addRunEvent(runId, "validation_started", "Validation started", `${checks.length} configured check${checks.length === 1 ? "" : "s"} detected.`);
-    const checked = await dependencies.runChecks(workspace.workspacePath, checks, (next) => updateRun(runId, { checks: safeChecks(next), currentActivity: next.find((check) => check.status === "running")?.command ?? "Running validation" }));
+    const checked = await dependencies.runChecks(workspace.workspacePath, checks, (next) => updateRun(runId, { checks: safeChecks(next), currentActivity: next.find((check) => check.status === "running")?.command ?? "Running validation" }, { ownerId }));
     const safeChecked = safeChecks(checked);
-    updateRun(runId, { checks: safeChecked });
+    updateRun(runId, { checks: safeChecked }, { ownerId });
     assertRunNotStopped(runId);
     const failedChecks = safeChecked.filter((check) => check.status === "failed");
     if (failedChecks.length > 0) {
@@ -199,10 +210,10 @@ export async function executeLiveRun(runId: string, taskId: string, sourceRunId?
     addRunEvent(runId, "validation_passed", "Validation passed", `${safeChecked.filter((check) => check.status === "passed").length}/${safeChecked.length} checks passed.`);
     await checkpoints?.checkpoint({ phase: "validation", progress: 72 }, { force: true });
     enterStage("git_handoff", "Committing and pushing the task branch.");
-    updateRun(runId, { progress: 88, currentActivity: "Committing and pushing the task branch" });
+    updateRun(runId, { progress: 88, currentActivity: "Committing and pushing the task branch" }, { ownerId });
     const handoff = await dependencies.commitAndPush(workspace, task.title);
     assertRunNotStopped(runId);
-    updateRun(runId, { commitSha: handoff.sha, changedFiles: handoff.changedFiles, progress: 94, currentActivity: "Creating the GitHub pull request" });
+    updateRun(runId, { commitSha: handoff.sha, changedFiles: handoff.changedFiles, progress: 94, currentActivity: "Creating the GitHub pull request" }, { ownerId });
     const handoffRun = getRun(runId);
     if (!handoffRun) throw new Error("Live run disappeared before GitHub handoff.");
     enterStage("pull_request", "Creating the GitHub pull request.");
@@ -212,7 +223,7 @@ export async function executeLiveRun(runId: string, taskId: string, sourceRunId?
     updateTask(task.id, { branchName: workspace.branchName, prUrl: pr.url, summary: `Live run completed. ${handoff.changedFiles.length} files changed; PR #${pr.number} is ready for human review.` });
     if (project.githubProjectId) await dependencies.reconcileTaskStatus(project, task, "human_review");
     assertRunNotStopped(runId);
-    const completedRun = finishRunAndTask(runId, task.id, { status: "completed", progress: 100, currentActivity: "Pull request ready for review", finishedAt: new Date().toISOString() }, { status: "human_review", agentState: "succeeded", branchName: workspace.branchName, prUrl: pr.url, summary: `Live run completed. ${handoff.changedFiles.length} files changed; PR #${pr.number} is ready for human review.` });
+    const completedRun = finishRunAndTask(runId, task.id, { status: "completed", progress: 100, currentActivity: "Pull request ready for review", finishedAt: new Date().toISOString() }, { status: "human_review", agentState: "succeeded", branchName: workspace.branchName, prUrl: pr.url, summary: `Live run completed. ${handoff.changedFiles.length} files changed; PR #${pr.number} is ready for human review.` }, ownerId);
     if (!completedRun) return;
     addRunEvent(runId, "handoff_complete", "Pull request created", pr.url);
     addActivity({ projectId: project.id, taskId: task.id, runId, type: "pull_request", title: "Live PR ready for review", detail: `${handoff.changedFiles.length} changed files · ${handoff.sha.slice(0, 8)}`, tone: "violet" });
@@ -224,8 +235,8 @@ export async function executeLiveRun(runId: string, taskId: string, sourceRunId?
     if (["stopped", "failed", "completed"].includes(getRun(runId)?.status ?? "")) return;
     const message = stageFailureMessage(stage, error);
     const currentFailedRun = getRun(runId);
-    if (currentFailedRun?.costSource === "pending") updateRun(runId, { costSource: "unavailable" });
-    const finalizedFailedRun = finishRunAndTask(runId, task.id, { status: "failed", currentActivity: "Live run failed", error: message, finishedAt: new Date().toISOString() }, { status: "blocked", agentState: "failed", summary: message });
+    if (currentFailedRun?.costSource === "pending") updateRun(runId, { costSource: "unavailable" }, { ownerId });
+    const finalizedFailedRun = finishRunAndTask(runId, task.id, { status: "failed", currentActivity: "Live run failed", error: message, finishedAt: new Date().toISOString() }, { status: "blocked", agentState: "failed", summary: message }, ownerId);
     if (!finalizedFailedRun) return;
     addRunEvent(runId, "stage_failed", `Live run stage failed: ${stage}`, safeErrorMessage(error));
     addRunEvent(runId, "run_failed", "Live run failed", message);
@@ -235,6 +246,7 @@ export async function executeLiveRun(runId: string, taskId: string, sourceRunId?
       detail: `Stage: ${stage}\nReason: ${boundedRedacted(safeErrorMessage(error), 1_700)}`,
     }, { force: true });
   } finally {
+    clearInterval(leaseTimer);
     checkpoints?.stop();
   }
 }

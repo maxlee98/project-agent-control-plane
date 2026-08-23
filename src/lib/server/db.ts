@@ -80,7 +80,13 @@ function createDatabase() {
       cache_read_tokens INTEGER NOT NULL DEFAULT 0,
       cache_write_tokens INTEGER NOT NULL DEFAULT 0,
       actual_cost_micros INTEGER,
-      cost_source TEXT NOT NULL DEFAULT 'pending'
+      cost_source TEXT NOT NULL DEFAULT 'pending',
+      owner_id TEXT,
+      lease_heartbeat_at TEXT,
+      lease_expires_at TEXT,
+      current_stage TEXT NOT NULL DEFAULT 'configuration',
+      recovery_status TEXT NOT NULL DEFAULT 'none',
+      recovery_reason TEXT
     );
     CREATE TABLE IF NOT EXISTS activity (
       id TEXT PRIMARY KEY,
@@ -124,6 +130,7 @@ function createDatabase() {
     CREATE INDEX IF NOT EXISTS idx_activity_created ON activity(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_active_run_claims_project ON active_run_claims(project_id, execution_mode);
     CREATE INDEX IF NOT EXISTS idx_active_run_claims_lease ON active_run_claims(lease_expires_at);
+    CREATE INDEX IF NOT EXISTS idx_runs_lease ON runs(status, lease_expires_at);
     CREATE INDEX IF NOT EXISTS idx_request_deduplication_operation ON request_deduplication(operation);
   `);
 
@@ -143,6 +150,12 @@ function createDatabase() {
   if (!existingColumns.has("cache_write_tokens")) database.exec("ALTER TABLE runs ADD COLUMN cache_write_tokens INTEGER NOT NULL DEFAULT 0");
   if (!existingColumns.has("actual_cost_micros")) database.exec("ALTER TABLE runs ADD COLUMN actual_cost_micros INTEGER");
   if (!existingColumns.has("cost_source")) database.exec("ALTER TABLE runs ADD COLUMN cost_source TEXT NOT NULL DEFAULT 'pending'");
+  if (!existingColumns.has("owner_id")) database.exec("ALTER TABLE runs ADD COLUMN owner_id TEXT");
+  if (!existingColumns.has("lease_heartbeat_at")) database.exec("ALTER TABLE runs ADD COLUMN lease_heartbeat_at TEXT");
+  if (!existingColumns.has("lease_expires_at")) database.exec("ALTER TABLE runs ADD COLUMN lease_expires_at TEXT");
+  if (!existingColumns.has("current_stage")) database.exec("ALTER TABLE runs ADD COLUMN current_stage TEXT NOT NULL DEFAULT 'configuration'");
+  if (!existingColumns.has("recovery_status")) database.exec("ALTER TABLE runs ADD COLUMN recovery_status TEXT NOT NULL DEFAULT 'none'");
+  if (!existingColumns.has("recovery_reason")) database.exec("ALTER TABLE runs ADD COLUMN recovery_reason TEXT");
   database.prepare("UPDATE runs SET cost_source = 'unavailable' WHERE cost_source = 'pending' AND status IN ('completed', 'failed', 'stopped')").run();
 
   const taskColumns = database.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;

@@ -61,6 +61,7 @@ export class IssueCheckpointPublisher {
   private readonly intervalMs: number;
   private readonly now: () => number;
   private readonly options: IssueCheckpointPublisherOptions;
+  private lastEnqueuedBody: string | null = null;
 
   constructor(options: IssueCheckpointPublisherOptions) {
     this.options = options;
@@ -83,22 +84,27 @@ export class IssueCheckpointPublisher {
   checkpoint(checkpoint: IssueCheckpoint, options: { force?: boolean } = {}) {
     if (this.stopped) return this.queue;
     this.latest = checkpoint;
+    const body = formatIssueCheckpoint(this.options.runId, checkpoint);
+    if (body === this.lastEnqueuedBody) return this.queue;
     if (!options.force && this.now() - this.lastScheduledAt < this.intervalMs) {
       return this.queue;
     }
-    return this.enqueue(checkpoint);
+    return this.enqueue(checkpoint, body);
   }
 
   flushPending() {
     if (!this.latest || this.stopped || this.now() - this.lastScheduledAt < this.intervalMs) return this.queue;
-    return this.enqueue(this.latest);
+    const body = formatIssueCheckpoint(this.options.runId, this.latest);
+    if (body === this.lastEnqueuedBody) return this.queue;
+    return this.enqueue(this.latest, body);
   }
 
-  private enqueue(checkpoint: IssueCheckpoint) {
+  private enqueue(checkpoint: IssueCheckpoint, body = formatIssueCheckpoint(this.options.runId, checkpoint)) {
     this.lastScheduledAt = this.now();
+    this.lastEnqueuedBody = body;
     this.queue = this.queue.then(async () => {
       try {
-        await this.options.publishComment(this.options.fullName, this.options.issueNumber, formatIssueCheckpoint(this.options.runId, checkpoint));
+        await this.options.publishComment(this.options.fullName, this.options.issueNumber, body);
       } catch (error) {
         try { this.options.onFailure?.(checkpoint, error); } catch { /* Failure reporting must not break the queue. */ }
       }
