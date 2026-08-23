@@ -34,34 +34,18 @@ test("translates agent content into stable control-plane events", () => {
   });
 });
 
-test("translates progress, stream, hook, and terminal events without source vocabulary", () => {
-  assert.equal(translateClineEvent({ type: "agent_event", payload: { event: { type: "iteration_start", iteration: 2 } } })?.detail, "Iteration 2");
+test("keeps useful progress while omitting low-value SDK chatter", () => {
   assert.equal(translateClineEvent({ type: "agent_event", payload: { event: { type: "notice", message: "Compacting context" } } })?.type, "progress");
   assert.equal(translateClineEvent({ type: "hook", payload: { hookEventName: "tool_result", toolName: "search" } })?.type, "tool_finished");
-  assert.equal(translateClineEvent({ type: "status", payload: { status: "running" } })?.message, "Agent status updated");
+  assert.equal(translateClineEvent({ type: "status", payload: { status: "running" } }), null);
+  assert.equal(translateClineEvent({ type: "chunk", payload: { chunk: "raw model output" } }), null);
+  assert.equal(translateClineEvent({ type: "agent_event", payload: { event: { type: "usage", totalInputTokens: 20 } } }), null);
+  assert.equal(translateClineEvent({ type: "agent_event", payload: { event: { type: "iteration_start", iteration: 2 } } }), null);
   assert.equal(translateClineEvent({ type: "ended", payload: { reason: "aborted" } })?.type, "run_failed");
-
-  const unknown = translateClineEvent({ type: "future_cline_event", payload: { raw: "ignored" } });
-  assert.deepEqual(unknown, {
-    type: "unknown",
-    message: "Agent update received",
-    detail: null,
-    checkpoint: false,
-  });
-  assert.equal(unknown?.message.includes("future_cline_event"), false);
+  assert.equal(translateClineEvent({ type: "future_cline_event", payload: { raw: "ignored" } }), null);
 });
 
 test("redacts and bounds selected details while excluding session identifiers", () => {
-  const chunk = translateClineEvent({
-    type: "chunk",
-    payload: { sessionId: "session-secret-id", chunk: `apiKey=cline-event-test-secret ${"x".repeat(3_000)}` },
-  });
-  assert.equal(chunk?.type, "output_chunk");
-  assert.equal(chunk?.detail?.includes("cline-event-test-secret"), false);
-  assert.equal(chunk?.detail?.includes("[REDACTED_SECRET]"), true);
-  assert.equal(chunk?.detail?.includes("session-secret-id"), false);
-  assert.equal((chunk?.detail?.length ?? 0) <= 2_001, true);
-
   const event = translateClineEvent({
     type: "agent_event",
     payload: { sessionId: "session-secret-id", event: { type: "content_start", contentType: "text", text: "working" } },

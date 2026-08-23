@@ -141,32 +141,16 @@ export function translateClineEvent(input: unknown): RunEventDraft | null {
     const contentType = stringValue(agentEvent.contentType);
     if (contentType === "tool") return eventDraft("tool_started", "Agent started a tool", toolDetail(agentEvent));
     if (contentType === "text") return eventDraft("progress", "Agent started producing output", agentEvent.text);
-    return eventDraft("progress", "Agent started an internal update");
+    return null;
   }
-  if (agentEvent && agentType === "content_update") {
-    return eventDraft("progress", "Agent tool progress updated", toolDetail(agentEvent));
-  }
+  if (agentEvent && agentType === "content_update") return null;
   if (agentEvent && agentType === "content_end") {
     const contentType = stringValue(agentEvent.contentType);
     if (contentType === "tool") return eventDraft("tool_finished", "Agent finished a tool", toolDetail(agentEvent, true));
     if (contentType === "text") return eventDraft("output_summary", "Agent output summarized", agentEvent.text);
-    return eventDraft("progress", "Agent completed an internal update");
+    return null;
   }
-  if (agentEvent && agentType === "iteration_start") {
-    const iteration = numberValue(agentEvent.iteration);
-    return eventDraft("progress", "Agent iteration started", iteration === undefined ? undefined : `Iteration ${iteration}`);
-  }
-  if (agentEvent && agentType === "iteration_end") {
-    const iteration = numberValue(agentEvent.iteration);
-    const toolCallCount = numberValue(agentEvent.toolCallCount);
-    const detail = iteration === undefined
-      ? undefined
-      : toolCallCount === undefined
-        ? `Iteration ${iteration} completed`
-        : `Iteration ${iteration} completed · ${toolCallCount} tool calls`;
-    return eventDraft("progress", "Agent iteration completed", detail);
-  }
-  if (agentEvent && agentType === "usage") return eventDraft("progress", "Agent usage updated");
+  if (agentEvent && (agentType === "iteration_start" || agentType === "iteration_end" || agentType === "usage")) return null;
   if (agentEvent && agentType === "notice") return eventDraft("progress", "Agent reported an update", agentEvent.message);
   if (agentEvent && agentType === "done") {
     const completed = stringValue(agentEvent.reason) === "completed";
@@ -175,8 +159,7 @@ export function translateClineEvent(input: unknown): RunEventDraft | null {
   if (agentEvent && agentType === "error") return eventDraft("run_failed", "Agent reported an error", agentEvent.error instanceof Error ? agentEvent.error.message : agentEvent.error);
 
   if (envelopeType === "chunk") {
-    const payload = eventRecord(envelope.payload);
-    return eventDraft("output_chunk", "Agent output received", payload?.chunk);
+    return null;
   }
   if (envelopeType === "ended") {
     const payload = eventRecord(envelope.payload);
@@ -190,20 +173,18 @@ export function translateClineEvent(input: unknown): RunEventDraft | null {
       case "tool_result": return eventDraft("tool_finished", "Agent finished a tool", payload?.toolName);
       case "agent_end": return eventDraft("run_completed", "Agent turn completed");
       case "agent_error": return eventDraft("run_failed", "Agent reported an error");
-      case "session_shutdown": return eventDraft("progress", "Agent session shut down");
-      default: return eventDraft("unknown", "Agent update received");
+      case "session_shutdown": return null;
+      default: return null;
     }
   }
-  if (envelopeType === "status") return eventDraft("progress", "Agent status updated");
-  if (envelopeType === "team_progress") return eventDraft("progress", "Agent team progress updated");
+  if (envelopeType === "status" || envelopeType === "team_progress") return null;
   if (envelopeType === "pending_prompts") {
     const payload = eventRecord(envelope.payload);
     const prompts = Array.isArray(payload?.prompts) ? payload.prompts.length : 0;
     return eventDraft("progress", "Agent is waiting for input", `${prompts} pending instruction${prompts === 1 ? "" : "s"}`);
   }
-  if (envelopeType === "pending_prompt_submitted") return eventDraft("progress", "Agent instruction submitted");
-  if (envelopeType === "session_snapshot") return eventDraft("progress", "Agent session state updated");
-  return eventDraft("unknown", "Agent update received");
+  if (envelopeType === "pending_prompt_submitted" || envelopeType === "session_snapshot") return null;
+  return null;
 }
 
 async function abortAndStopSession(cline: ClineCore, sessionId: string, reason: Error) {

@@ -53,6 +53,22 @@ test("throttles ordinary progress and publishes the latest checkpoint", async ()
   publisher.stop();
 });
 
+test("does not publish duplicate checkpoint content", async () => {
+  const bodies: string[] = [];
+  const publisher = new IssueCheckpointPublisher({
+    fullName: "owner/repository",
+    issueNumber: 70,
+    runId: "run-duplicate",
+    publishComment: async (_fullName, _issueNumber, body) => { bodies.push(body); },
+  });
+
+  await publisher.checkpoint({ phase: "workspace", progress: 12 }, { force: true });
+  await publisher.checkpoint({ phase: "workspace", progress: 12 }, { force: true });
+
+  assert.equal(bodies.length, 1);
+  publisher.stop();
+});
+
 test("serializes checkpoints and reports GitHub failures without rejecting the run", async () => {
   const order: string[] = [];
   const failures: string[] = [];
