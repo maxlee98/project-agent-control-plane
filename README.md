@@ -39,7 +39,7 @@ Next.js control room
 
 - Node.js 22+
 - Git
-- A local GitHub CLI login (`gh auth login`) for the future GitHub adapter
+- A local GitHub CLI login (`gh auth login`) for GitHub repository operations and diagnostics
 - Cline configuration for real agent runs (optional while using demo mode)
 
 ## Run locally
@@ -111,26 +111,29 @@ overridden with the `*_RETENTION_DAYS` variables in `.env.local`.
 Use the **Add repository** flow to register a checkout and, for Live mode, its GitHub Projects V2
 board. The detailed, copyable procedure is in the [repository onboarding checklist](docs/repository-onboarding.md).
 
-The current flow records these values in local SQLite and does not clone, inspect, install, create a
-branch, or modify the target checkout:
+The current flow records these values in local SQLite and can optionally run a read-only readiness
+check. Registration and readiness do not clone, install dependencies, create a run worktree, or
+silently modify the target checkout:
 
 1. GitHub `owner/repository` name.
 2. Absolute or `~/` local checkout path.
 3. Projects V2 node ID (`PVT_…`), optional in Demo and required for Live synchronization.
 4. Optional repository description.
+5. **Check readiness now**, enabled by default in the Add repository dialog.
 
-Before using Live mode, manually verify that the checkout is the intended Git repository with an
-accessible `origin/main`, supports isolated worktrees, has an effective `WORKFLOW.md` and validation
-plan, and is ready for the Projects V2 status/priority contract. Demo mode remains available without
-GitHub or Cline credentials and never edits the target repository.
+Before using Live mode, run or re-run the **Repository readiness** check and resolve every Live-required
+blocker or unknown result. The dashboard reports the readiness level, contract version, timestamp,
+category counts, remediation, and canonical Projects V2 status/priority mappings. Live task status
+changes, sync, starts, retries, and continuations recheck readiness and return `READINESS_BLOCKED`
+when the repository is not ready. Demo mode remains available without GitHub or Cline credentials and
+never edits the target repository.
 
 The control plane uses a repository-local `WORKFLOW.md` when present and otherwise falls back to the
 starter contract at [`workflows/default/WORKFLOW.md`](workflows/default/WORKFLOW.md). It does not
-silently copy this repository's `AGENTS.md`, `.agents/skills/`, or pull-request template into a
-managed repository. If a target repository needs a missing workflow baseline or PR template, create
-it on a dedicated target-repository branch and deliver it through a pull request with human review.
-Repository-readiness reports and baseline-PR preparation are planned separately; they are not part of
-the current Add repository flow.
+silently copy this repository's `AGENTS.md` or `.agents/skills/` into a managed repository. If a target
+repository needs a missing `WORKFLOW.md` or pull-request template, the readiness card can propose an
+explicit **Create baseline via PR** action. That action adds only missing baseline files on a dedicated
+target-repository branch and opens a pull request for human review; it never merges automatically.
 
 ## Documentation index
 
@@ -151,8 +154,8 @@ reference that matches the question:
 | [LLDs](LLD/) | Durable designs, decisions, risks, and validation records for Issue-backed work. |
 
 The [repository-onboarding documentation Issue](https://github.com/maxlee98/project-agent-control-plane/issues/81)
-tracks this documentation work. Automated repository inspection and Live preflight gating should be
-tracked separately from the current manual checklist.
+tracks this documentation work. The available readiness implementation is covered by the checklist;
+future improvements should be tracked separately from the current onboarding contract.
 
 ## Pull-request-first development
 
@@ -195,6 +198,7 @@ Merging remains a human decision; agents must not merge automatically.
 1. GitHub Projects V2 read sync, Issue creation/comments, and PR creation are wired for Live mode.
 2. ClineCore event translation and isolated worktrees are wired for Live mode.
 3. Automatic branch/commit/push/PR handoff is wired for Live mode.
-4. Hosted webhook reconciliation, richer Projects V2 status writes, and multi-user auth remain later hardening work.
+4. Repository readiness inspection, Live preflight gates, and explicit baseline pull-request preparation are wired for Live mode.
+5. Hosted webhook reconciliation, richer Projects V2 status writes, and multi-user auth remain later hardening work.
 
 See `docs/architecture.md` and `docs/security-model.md` for the implementation contract.

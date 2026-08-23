@@ -11,9 +11,9 @@
 
 The control plane's root README explains how to start the application and enable Live mode, but it
 does not provide a single checklist for adding and validating a managed repository. The Add repository
-flow currently stores a GitHub `owner/repository`, local checkout path, optional Projects V2 node ID,
-and description; it does not yet run the repository-readiness feature described in the separate
-readiness product issue.
+flow stores a GitHub `owner/repository`, local checkout path, optional Projects V2 node ID, and
+description, and now offers a read-only readiness check. Operators still need one durable explanation
+of the readiness levels, remediation, baseline PR action, and Live preflight contract.
 
 Important guidance is distributed across the README, environment example, workflow contract, and
 architecture, security, API, local SQLite, and terminal-reliability documents. Operators can therefore
@@ -26,12 +26,13 @@ Projects V2 status and priority fields, host-side credentials, or human-reviewed
 2. Distinguish registration, Demo-mode, and Live-mode requirements.
 3. Document safe stop conditions, baseline-file handling, secrets boundaries, and human handoff.
 4. Add a discoverable README documentation index linking to important operational and policy documents.
-5. Keep current manual behavior separate from future repository-readiness automation.
+5. Explain the available repository-readiness report and Live preflight gate without duplicating its
+   implementation details.
 
 ## Non-goals
 
-- Do not implement readiness APIs, dashboard checks, Live preflight enforcement, or baseline PR
-  automation.
+- Do not change the existing readiness APIs, dashboard checks, Live preflight enforcement, or baseline
+  PR automation; those capabilities already exist independently of this documentation task.
 - Do not modify a managed target repository or GitHub Projects configuration as part of onboarding
   documentation.
 - Do not change runtime, database, security, workflow, or pull-request enforcement behavior.
@@ -57,10 +58,11 @@ Projects V2 status and priority fields, host-side credentials, or human-reviewed
 Add an onboarding section near the existing Repository setup section that:
 
 - links to the detailed checklist;
-- summarizes the three onboarding levels;
-- states that registration currently records metadata only and does not silently alter the checkout;
+- summarizes the Registered, Inspectable, Demo-ready, and Live-ready levels;
+- states that registration records metadata and optionally runs read-only readiness without silently
+  altering the checkout;
 - explains that Demo mode does not require Live credentials or a GitHub Project;
-- links to the environment example and the Live-mode prerequisites; and
+- links to the environment example, readiness report, and Live-mode prerequisites; and
 - points operators to the documentation index for deeper contracts.
 
 Add a documentation index containing links to the onboarding, architecture, API, security, local
@@ -81,16 +83,16 @@ The new checklist will be organized into:
 9. Troubleshooting and safe stop conditions.
 
 Each item will identify whether it is required for registration, Demo operation, or Live operation.
-The checklist will use relative links to existing repository documents and will avoid suggesting that
-the future readiness implementation is already available.
+The checklist will use relative links to existing repository documents and will describe the available
+readiness levels, check categories, baseline proposal, and Live gate accurately.
 
 ### Baseline and safety policy
 
 The documentation will state that a missing target `WORKFLOW.md`, `AGENTS.md`, local skill, or pull
-request template is a finding to review, not permission for silent copying. If a baseline is desired,
-it must be proposed on a dedicated target-repository branch and delivered through a pull request with
-human review. Secrets remain host-side and are never placed in target-repository files, task comments,
-run events, or PR descriptions.
+request template is a finding to review, not permission for silent copying. The available explicit
+baseline action adds only missing `WORKFLOW.md` and pull-request-template files on a dedicated
+target-repository branch and opens a pull request with human review. Secrets remain host-side and are
+never placed in target-repository files, task comments, run events, or PR descriptions.
 
 ## Acceptance criteria
 
@@ -101,7 +103,7 @@ run events, or PR descriptions.
   stop conditions.
 - `README.md` links to the checklist and important architecture, API, local-operations, security,
   terminal-reliability, workflow, environment, and PR-template references.
-- Current/manual behavior and future/planned readiness automation are explicitly separated.
+- Current/manual onboarding and the available readiness automation are explicitly distinguished.
 - Documentation does not expose secrets or imply that baseline files are silently installed.
 - Documentation-only changes pass whitespace validation, tests, typecheck, and build.
 - The PR explicitly closes Issue #81 and uses the repository PR template.
@@ -111,7 +113,7 @@ run events, or PR descriptions.
 | Risk | Mitigation |
 | --- | --- |
 | Checklist drifts from runtime behavior | Derive requirements from current API, workspace, GitHub, workflow, security, and README contracts; read back all links. |
-| Operators mistake planned readiness for an available feature | Label readiness automation as planned and describe the current manual flow. |
+| Operators misunderstand the scope of a readiness result | Document the report level, Live-required checks, remediation, and known manual decisions without implying that readiness replaces human review. |
 | Documentation encourages unsafe target-repository changes | Require explicit target-repository branch/PR handling and host-side secrets. |
 | Long checklist becomes difficult to use | Use short checkboxes grouped by onboarding stage and link to deeper documents rather than duplicating them. |
 
@@ -131,19 +133,20 @@ impact.
 
 ## Validation results
 
-- `npm run safe:run -- --timeout-ms 120000 -- npm test` — passed; 112 tests passed, 0 failed.
+- `npm run safe:run -- --timeout-ms 120000 -- npm test` — passed; 120 tests passed, 0 failed.
 - `npm run safe:run -- --timeout-ms 120000 -- npm run typecheck` — passed with no TypeScript diagnostics.
 - `npm run safe:run -- --timeout-ms 120000 -- npm run build` — passed; Next.js compiled and finalized
   route optimization. The existing non-fatal Turbopack NFT tracing warning remains outside this
   documentation-only scope.
-- `npm run safe:run -- --timeout-ms 30000 -- git diff --check` — passed before staging.
+- `npm run safe:run -- --timeout-ms 30000 -- git diff --cached --check` — passed for the final staged
+  documentation diff.
 
 ## Decision log
 
 - 2026-08-23: Use one detailed `docs/repository-onboarding.md` document rather than a second root
   README, and expose it through a README reference index.
-- 2026-08-23: Keep this task documentation-only; repository-readiness automation remains a separate
-  implementation concern.
+- 2026-08-23: Keep this task documentation-only; the readiness implementation is available from the
+  current `main` baseline and is documented rather than changed here.
 - 2026-08-23: Issue #81 is the canonical task identity and will be linked with `Fixes #81` in the PR.
 
 ## Completion checklist
