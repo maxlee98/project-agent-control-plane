@@ -120,13 +120,6 @@ function usageFrom(value: unknown): Partial<RunUsageSnapshot> | undefined {
   };
 }
 
-function toolDetail(agentEvent: Record<string, unknown>, includeError = false) {
-  const toolName = redactedText(agentEvent.toolName, 240);
-  const error = includeError ? redactedText(agentEvent.error, 1_200) : null;
-  if (toolName && error) return `${toolName}: ${error}`;
-  return error ?? toolName;
-}
-
 /**
  * Translate ClineCore's event vocabulary at the integration boundary. Only stable control-plane
  * event types and selected, redacted scalar details leave this function.
@@ -140,19 +133,19 @@ export function translateClineEvent(input: unknown): RunEventDraft | null {
 
   if (agentEvent && agentType === "content_start") {
     const contentType = stringValue(agentEvent.contentType);
-    if (contentType === "tool") return eventDraft("tool_started", "Agent started a tool", toolDetail(agentEvent));
-    if (contentType === "text") return eventDraft("progress", "Agent started producing output", agentEvent.text);
+    // A content start is an implementation detail. Wait for the bounded final text
+    // summary before exposing anything to the human-facing run history.
+    if (contentType === "tool" || contentType === "text") return null;
     return null;
   }
   if (agentEvent && agentType === "content_update") return null;
   if (agentEvent && agentType === "content_end") {
     const contentType = stringValue(agentEvent.contentType);
-    if (contentType === "tool") return eventDraft("tool_finished", "Agent finished a tool", toolDetail(agentEvent, true));
     if (contentType === "text") return eventDraft("output_summary", "Agent output summarized", agentEvent.text);
     return null;
   }
   if (agentEvent && (agentType === "iteration_start" || agentType === "iteration_end" || agentType === "usage")) return null;
-  if (agentEvent && agentType === "notice") return eventDraft("progress", "Agent reported an update", agentEvent.message);
+  if (agentEvent && agentType === "notice") return null;
   if (agentEvent && agentType === "done") {
     const completed = stringValue(agentEvent.reason) === "completed";
     return eventDraft(completed ? "run_completed" : "run_failed", completed ? "Agent turn completed" : "Agent turn ended before completion", completed ? agentEvent.text : undefined);
@@ -170,8 +163,9 @@ export function translateClineEvent(input: unknown): RunEventDraft | null {
   if (envelopeType === "hook") {
     const payload = eventRecord(envelope.payload);
     switch (stringValue(payload?.hookEventName)) {
-      case "tool_call": return eventDraft("tool_started", "Agent started a tool", payload?.toolName);
-      case "tool_result": return eventDraft("tool_finished", "Agent finished a tool", payload?.toolName);
+      case "tool_call":
+      case "tool_result":
+        return null;
       case "agent_end": return eventDraft("run_completed", "Agent turn completed");
       case "agent_error": return eventDraft("run_failed", "Agent reported an error");
       case "session_shutdown": return null;
@@ -261,7 +255,7 @@ export async function runCline(input: AgentRunInput & { runId: string; providerI
     const translated = translateClineEvent(event);
     if (translated) {
       callbacks.onEvent(translated);
-      if (translated.type === "progress" || translated.type === "tool_started" || translated.type === "tool_finished" || translated.type === "output_summary") {
+      if (translated.type === "progress" || translated.type === "output_summary") {
         callbacks.onActivity(translated.message, translated.detail);
       }
     }
@@ -322,7 +316,6 @@ export async function runCline(input: AgentRunInput & { runId: string; providerI
     sessionId = result.sessionId.trim();
     if (!sessionId) throw new Error("Cline startup returned no session ID.");
     activeSessions.set(input.runId, { cline, sessionId });
-    callbacks.onEvent(eventDraft("session_started", "Cline session started"));
     const remainingMs = Math.max(1, deadline - Date.now());
     const sendResult = await withTimeout(cline.send({ sessionId, prompt: input.prompt, mode: "act" }), remainingMs, "completion", () => stopAfterTimeout(timeoutError("completion")));
     const completion: ClineCompletion = sendResult

@@ -146,7 +146,7 @@ test("starts a session before sending the task turn and uses the returned result
   assert.equal(result.text, "returned result");
   assert.equal(result.finishReason, "completed");
   assert.equal(result.usage?.actualCostUsd, usage.actualCostUsd);
-  assert.equal(events.includes("session_started"), true);
+  assert.equal(events.includes("session_started"), false);
   assert.equal(events.includes("run_completed"), true);
   assert.equal(events.includes("done"), false);
   assert.equal(hasActiveClineSession("cline-unit"), false);
@@ -210,7 +210,7 @@ function createDependencies(label: string, options: { commentFailure?: boolean; 
     runCline: async (input, callbacks) => {
       options.prompts?.push(input.prompt);
       if (options.clineFailure) throw new Error(`Provider failed with token=${secret}`);
-      callbacks.onActivity("Cline completed");
+      callbacks.onActivity("Agent output summarized", "Completed safely");
       callbacks.onEvent({ type: "output_summary", message: "Agent output summarized", detail: "Completed safely", checkpoint: false });
       callbacks.onUsage?.(usage);
       return { sessionId: `session-${label}`, text: "Completed task", finishReason: "completed" as const, usage };
@@ -237,12 +237,11 @@ function createDependencies(label: string, options: { commentFailure?: boolean; 
 
 test("completes a mocked live run with persisted state, events, PR identity, and cost", async () => {
   const fixture = createLiveFixture("success");
-  await executeLiveRun(fixture.run.id, fixture.task.id, undefined, createDependencies("success"));
+  const comments: string[] = [];
+  await executeLiveRun(fixture.run.id, fixture.task.id, undefined, createDependencies("success", { commentBodies: comments }));
 
   const completedRun = repository.getRun(fixture.run.id);
   const completedTask = repository.getTask(fixture.task.id);
-  const events = repository.getRunEvents(fixture.run.id);
-  const eventTypes = new Set(events.map((event) => event.type));
 
   assert.equal(completedRun?.status, "completed");
   assert.equal(completedRun?.progress, 100);
@@ -254,15 +253,29 @@ test("completes a mocked live run with persisted state, events, PR identity, and
   assert.equal(completedTask?.status, "human_review");
   assert.equal(completedTask?.agentState, "succeeded");
   assert.equal(completedTask?.prUrl, "https://github.com/example/live-success/pull/36");
-  for (const stage of ["configuration", "workspace", "cline", "validation", "git_handoff", "pull_request", "issue_update"]) {
-    assert.equal(events.some((event) => event.type === "stage_started" && event.message.includes(stage)), true, `missing stage event: ${stage}`);
+  repository.addRunEvent(fixture.run.id, "tool_started", "Agent started a tool", "read_file");
+  repository.addRunEvent(fixture.run.id, "tool_finished", "Agent finished a tool", "read_file");
+  repository.addRunEvent(fixture.run.id, "session_started", "Cline session started");
+  const events = repository.getRunEvents(fixture.run.id);
+  const eventTypes = new Set(events.map((event) => event.type));
+  for (const message of ["Checking live-run prerequisites", "Preparing the isolated workspace", "Working on the assigned task", "Validating the repository changes", "Preparing the branch handoff", "Opening the pull request", "Publishing the review checkpoint"]) {
+    assert.equal(events.some((event) => event.type === "stage_started" && event.message === message), true, `missing stage event: ${message}`);
   }
   assert.equal(eventTypes.has("handoff_complete"), true);
   assert.equal(eventTypes.has("output_summary"), true);
+  assert.equal(eventTypes.has("tool_started"), false);
+  assert.equal(eventTypes.has("tool_finished"), false);
   assert.equal(eventTypes.has("validation_started"), true);
   assert.equal(eventTypes.has("validation_passed"), true);
   assert.equal(eventTypes.has("content_end"), false);
   assert.equal(eventTypes.has("done"), false);
+  assert.equal(comments.some((body) => body.includes("Agent progress: started")), true);
+  assert.equal(comments.some((body) => body.includes("Workspace: Isolated worktree")), true);
+  assert.equal(comments.some((body) => body.includes("Branch: agent/live-success")), true);
+  assert.equal(comments.some((body) => body.includes("Now: Completed safely")), true);
+  assert.equal(comments.some((body) => body.includes("Next:")), true);
+  assert.equal(comments.some((body) => body.includes("Pull request: https://github.com/example/live-success/pull/36")), true);
+  assert.equal(comments.some((body) => body.includes("tool_started") || body.includes("tool_finished")), false);
 });
 
 test("keeps a completed handoff when the optional Issue comment fails", async () => {
