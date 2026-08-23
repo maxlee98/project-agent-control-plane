@@ -32,9 +32,10 @@ after(() => {
 test("applies ordered migrations once and creates retention indexes", () => {
   const database = new Database(":memory:");
   assert.equal(runMigrations(database), LATEST_SCHEMA_VERSION);
-  assert.deepEqual(getAppliedMigrations(database).map((migration) => migration.version), [1, 2, 3]);
+  assert.deepEqual(getAppliedMigrations(database).map((migration) => migration.version), [1, 2, 3, 4]);
   assert.equal(runMigrations(database), LATEST_SCHEMA_VERSION);
-  assert.deepEqual(getAppliedMigrations(database).map((migration) => migration.version), [1, 2, 3]);
+  assert.deepEqual(getAppliedMigrations(database).map((migration) => migration.version), [1, 2, 3, 4]);
+  assert.ok((database.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>).some((column) => column.name === "readiness_json"));
 
   const indexes = (database.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all() as Array<{ name: string }>)
     .map((row) => row.name);
@@ -42,6 +43,24 @@ test("applies ordered migrations once and creates retention indexes", () => {
   assert.ok(indexes.includes("idx_activity_task_created"));
   assert.ok(indexes.includes("idx_runs_retention"));
   assert.ok(indexes.includes("idx_remote_deliveries_retention"));
+  database.close();
+});
+
+test("adds readiness storage to a database already recorded at schema version three", () => {
+  const database = new Database(":memory:");
+  database.exec(`
+    CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL);
+    CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL);
+    INSERT INTO schema_migrations (version, name, applied_at) VALUES
+      (1, 'base-schema', '2026-08-23T00:00:00.000Z'),
+      (2, 'current-columns-and-leases', '2026-08-23T00:00:01.000Z'),
+      (3, 'retention-metadata-and-history-indexes', '2026-08-23T00:00:02.000Z');
+  `);
+
+  assert.equal((database.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>).some((column) => column.name === "readiness_json"), false);
+  assert.equal(runMigrations(database), LATEST_SCHEMA_VERSION);
+  assert.equal((database.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>).some((column) => column.name === "readiness_json"), true);
+  assert.deepEqual(getAppliedMigrations(database).map((migration) => migration.version), [1, 2, 3, 4]);
   database.close();
 });
 

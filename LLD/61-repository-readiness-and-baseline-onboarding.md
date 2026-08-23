@@ -101,7 +101,7 @@ call; no destructive migration is required.
 ## Open questions and assumptions
 - GitHub Project capability can be represented by an optional adapter response; unavailable access is
   an explicit unknown/blocker for Live, not for Demo.
-- Existing projects may have no report column until the lightweight schema migration runs.
+- Existing projects may have no report column until the dedicated repository-readiness migration runs.
 
 ## Completion checklist
 - [x] Design reviewed
@@ -112,14 +112,15 @@ call; no destructive migration is required.
 - [x] Handoff implementation documented and PR verified
 
 ## Validation results
-- `npm run safe:run -- --timeout-ms 120000 -- npm test` — passed, 119 tests after reconciling current
-  `main` and adding focused Live-readiness and baseline safety coverage.
+- `npm run safe:run -- --timeout-ms 120000 -- npm test` — passed, 120 tests after reconciling current
+  `main` and adding focused Live-readiness, baseline safety, and schema-upgrade coverage.
 - The focused readiness tests cover missing checkout, valid Git root, no execution of detected
   validation, default workflow selection, baseline proposal, and safe redaction. GitHub status
   mapping is exposed through the adapter capability method and retains the existing mocked adapter
   coverage. Additional safeguards reject ambiguous task status options, gate Live sync/status
   mutations on a fresh readiness assessment, preserve Demo availability while Live is blocked, and
-  reject baseline requests before mutation when the origin is invalid.
+  reject baseline requests before mutation when the origin is invalid. Readiness persistence uses a
+  dedicated additive migration for databases already recorded at schema version 3.
 - `npm run safe:run -- --timeout-ms 120000 -- npm run typecheck` — passed after installing dependencies.
 - `npm run safe:run -- --timeout-ms 120000 -- git diff --check` — passed.
 - `npm install` was required because dependencies were not present; npm reported existing audit

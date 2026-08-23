@@ -12,7 +12,7 @@ declare global {
 const dataDir = path.resolve(process.env.DATA_DIR ?? ".data");
 const databasePath = path.join(dataDir, "control-plane.db");
 
-export const LATEST_SCHEMA_VERSION = 3;
+export const LATEST_SCHEMA_VERSION = 4;
 
 export const DEFAULT_RETENTION_DAYS = {
   runEvents: 90,
@@ -196,7 +196,6 @@ function applyCurrentColumns(database: Database.Database) {
   ensureColumn(database, "runs", "recovery_reason", "recovery_reason TEXT");
   ensureColumn(database, "tasks", "estimated_cost_cents", "estimated_cost_cents INTEGER NOT NULL DEFAULT 0");
   ensureColumn(database, "projects", "is_demo", "is_demo INTEGER NOT NULL DEFAULT 0");
-  ensureColumn(database, "projects", "readiness_json", "readiness_json TEXT");
   database.prepare("UPDATE runs SET cost_source = 'unavailable' WHERE cost_source = 'pending' AND status IN ('completed', 'failed', 'stopped')").run();
   database.prepare("UPDATE tasks SET status = 'human_review' WHERE lower(replace(replace(status, ' ', '_'), '-', '_')) IN ('agent_review', 'in_review', 'human_review', 'review')").run();
 
@@ -228,10 +227,15 @@ function applyRetentionSchema(database: Database.Database) {
   `);
 }
 
+function applyReadinessSchema(database: Database.Database) {
+  ensureColumn(database, "projects", "readiness_json", "readiness_json TEXT");
+}
+
 export const SCHEMA_MIGRATIONS: readonly SchemaMigration[] = [
   { version: 1, name: "base-schema", up: createBaseSchema },
   { version: 2, name: "current-columns-and-leases", up: applyCurrentColumns },
   { version: 3, name: "retention-metadata-and-history-indexes", up: applyRetentionSchema },
+  { version: 4, name: "repository-readiness", up: applyReadinessSchema },
 ];
 
 export function getAppliedSchemaVersion(database: Database.Database) {
