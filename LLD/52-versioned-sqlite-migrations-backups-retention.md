@@ -157,8 +157,8 @@ terminal old low-risk history -> delete only rows past policy boundary
 - `npm run safe:run -- --timeout-ms 30000 -- git diff --check` — passed.
 - `npm install` — restored the absent dependency tree; npm reported existing audit and Node-engine warnings. No lockfile change was produced.
 
-Remaining handoff work is branch freshness verification, commit/remote PR creation through the required
-template flow, and remote PR metadata verification. No automated merge is performed.
+Handoff is complete through the required template flow and remote metadata verification. No automated
+merge was performed; human review remains required.
 
 ## Handoff results
 
