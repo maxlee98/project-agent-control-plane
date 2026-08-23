@@ -102,10 +102,11 @@ call; no destructive migration is required.
 - [x] Implementation self-review completed
 - [x] Tests and typecheck passed
 - [x] Production build passed
-- [ ] Handoff implementation documented and PR verified
+- [x] Handoff implementation documented and PR verified
 
 ## Validation results
-- `npm run safe:run -- --timeout-ms 120000 -- npm test` — passed, 98 tests.
+- `npm run safe:run -- --timeout-ms 120000 -- npm test` — passed, 99 tests after merging current
+  `origin/main` priority changes.
 - The focused readiness tests cover missing checkout, valid Git root, no execution of detected
   validation, default workflow selection, baseline proposal, and safe redaction. GitHub status
   mapping is exposed through the adapter capability method and retains the existing mocked adapter
@@ -120,6 +121,7 @@ call; no destructive migration is required.
   filesystem access in the workspace/orchestrator route.
 
 ## Handoff status
-The implementation is left on the dedicated feature branch with no remote write or automatic merge.
-Before PR creation, rerun the required branch-freshness and PR-template gates. The existing NFT
+The implementation is on the dedicated feature branch with PR #69 open for human review:
+https://github.com/maxlee98/project-agent-control-plane/pull/69. The branch was verified fresh against
+`main` (`ahead=3`, `behind=0`) before PR creation. No automatic merge was performed. The existing NFT
 tracing warning remains a human-review warning.
