@@ -12,6 +12,7 @@ const previousEnvironment = new Map<string, string | undefined>([
   ["AGENT_MAX_CONCURRENT_RUNS", process.env.AGENT_MAX_CONCURRENT_RUNS],
   ["AGENT_MAX_CONCURRENT_RUNS_PER_PROJECT", process.env.AGENT_MAX_CONCURRENT_RUNS_PER_PROJECT],
   ["AGENT_CLAIM_LEASE_MINUTES", process.env.AGENT_CLAIM_LEASE_MINUTES],
+  ["AGENT_RUN_LEASE_MINUTES", process.env.AGENT_RUN_LEASE_MINUTES],
 ]);
 
 process.env.NODE_ENV = "production";
@@ -20,6 +21,7 @@ process.env.EXECUTION_MODE = "live";
 process.env.AGENT_MAX_CONCURRENT_RUNS = "4";
 process.env.AGENT_MAX_CONCURRENT_RUNS_PER_PROJECT = "2";
 process.env.AGENT_CLAIM_LEASE_MINUTES = "46";
+process.env.AGENT_RUN_LEASE_MINUTES = "46";
 
 const repository = await import("../src/lib/server/repository.ts");
 const database = (await import("../src/lib/server/db.ts")).db;
@@ -99,4 +101,46 @@ test("releases terminal claims and recovers expired claims without deleting hist
   assert.equal(repository.getRun(expiredRun.id)?.status, "failed");
   assert.equal(repository.getTask(expired.task.id)?.agentState, "failed");
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM runs WHERE id = ?").get(expiredRun.id).count, 1);
+});
+
+test("persists fenced lease metadata, renews healthy ownership, and supports restart recovery", () => {
+  const runFixture = fixture("lease-lifecycle");
+  const run = repository.createRun({ taskId: runFixture.task.id, mode: "start" });
+  assert.ok(run);
+  assert.equal(run.ownerId, repository.getRunOwnerId());
+  assert.ok(run.leaseHeartbeatAt);
+  assert.ok(run.leaseExpiresAt);
+  assert.equal(run.currentStage, "configuration");
+  assert.equal(run.recoveryStatus, "none");
+
+  const staged = repository.updateRun(run.id, { currentStage: "cline", workspacePath: "/tmp/preserved-lease-worktree" }, { ownerId: repository.getRunOwnerId() });
+  assert.equal(staged?.currentStage, "cline");
+  assert.equal(staged?.workspacePath, "/tmp/preserved-lease-worktree");
+  assert.equal(repository.updateRun(run.id, { currentStage: "validation" }, { ownerId: "owner-from-another-process" }), null);
+  assert.equal(repository.getRun(run.id)?.currentStage, "cline");
+  assert.equal(repository.renewRunLease(run.id, "owner-from-another-process"), null);
+  assert.equal(repository.recoverExpiredRunClaims(), 0);
+  const renewed = repository.renewRunLease(run.id);
+  assert.ok(renewed);
+  assert.equal(renewed?.ownerId, repository.getRunOwnerId());
+  assert.ok(Date.parse(renewed?.leaseHeartbeatAt ?? "") >= Date.parse(run.leaseHeartbeatAt ?? ""));
+
+  database.prepare("UPDATE active_run_claims SET lease_expires_at = ? WHERE run_id = ?").run("1970-01-01T00:00:00.000Z", run.id);
+  database.prepare("UPDATE runs SET lease_expires_at = ? WHERE id = ?").run("1970-01-01T00:00:00.000Z", run.id);
+  assert.equal(repository.recoverExpiredRunClaims(), 1);
+  const recovered = repository.getRun(run.id);
+  assert.equal(recovered?.status, "failed");
+  assert.equal(recovered?.recoveryStatus, "interrupted");
+  assert.equal(recovered?.ownerId, null);
+  assert.equal(recovered?.workspacePath, "/tmp/preserved-lease-worktree");
+  assert.ok(recovered?.finishedAt);
+  assert.match(recovered?.recoveryReason ?? "", /interrupted after its lease expired/);
+  assert.equal(repository.getTask(runFixture.task.id)?.agentState, "failed");
+  assert.equal(repository.getRunEvents(run.id).filter((event) => event.type === "run_recovered").length, 1);
+  assert.equal(repository.recoverExpiredRunClaims(), 0);
+
+  const retry = repository.createRun({ taskId: runFixture.task.id, mode: "retry" });
+  assert.ok(retry);
+  assert.equal(retry?.mode, "retry");
+  if (retry) repository.updateRun(retry.id, { status: "completed", finishedAt: new Date().toISOString() });
 });
