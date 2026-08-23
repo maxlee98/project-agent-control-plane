@@ -26,6 +26,8 @@ test("provides one generic issue template with consistent task metadata", () => 
 
   assert.match(template, /^### Goals$/m);
   assert.match(template, /^### Non-goals$/m);
+  assert.match(template, /^## Priority$/m);
+  assert.match(template, /Priority: P[0-3]/);
 });
 
 test("requires the generic issue template for GitHub issue creation", () => {

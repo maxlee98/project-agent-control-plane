@@ -2,10 +2,10 @@ import { publishComment, reconcileTaskStatus } from "@/lib/server/github";
 import { addTaskComment, claimIdempotencyKey, completeIdempotencyKey, completeTaskByHuman, getProject, getTask, updateTask, updateTaskIssue } from "@/lib/server/repository";
 import { parseEstimatedCostCents } from "@/lib/server/cost";
 import { API_LIMITS, apiError, apiErrorFrom, apiResponse, assertAllowedKeys, getIdempotencyKey, idempotencyResponse, optionalEnum, optionalInteger, optionalNonEmptyString, optionalString, parseJsonBody, requestFingerprint, validateIdentifier } from "@/lib/server/api";
-import { BOARD_COLUMNS, normalizeTaskStatus, type Project, type Task, type TaskStatus } from "@/lib/domain";
+import { BOARD_COLUMNS, normalizeTaskStatus, type Project, type Task, type TaskPriority, type TaskStatus } from "@/lib/domain";
 import { checkLiveReadiness } from "@/lib/server/readiness";
 
-type SyncableTask = Pick<Task, "id" | "issueNumber" | "title" | "description" | "githubUrl">;
+type SyncableTask = Pick<Task, "id" | "issueNumber" | "title" | "description" | "githubUrl" | "priority">;
 
 async function syncTaskStatus(project: Project, task: SyncableTask, status: TaskStatus) {
   const remote = await reconcileTaskStatus(project, task, status);
@@ -24,13 +24,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ta
     if (!task || !project) return apiError("TASK_NOT_FOUND", "Task not found.", 404);
     const rawStatus = optionalEnum(body, "status", [...BOARD_COLUMNS.map((column) => column.id), "agent_review", "in_review", "review"] as const);
     const status = rawStatus === undefined ? undefined : normalizeTaskStatus(rawStatus);
-    const priority = optionalInteger(body, "priority", 1, 4);
+    const priority = optionalInteger(body, "priority", 1, 4) as TaskPriority | undefined;
     const title = optionalNonEmptyString(body, "title", API_LIMITS.taskTitle);
     const description = optionalString(body, "description", API_LIMITS.taskDescription);
     const comment = optionalNonEmptyString(body, "comment", API_LIMITS.comment);
     const estimatedCostCents = body.estimatedCostUsd === undefined ? undefined : parseEstimatedCostCents(body.estimatedCostUsd);
     if (estimatedCostCents === null || (estimatedCostCents !== undefined && estimatedCostCents > API_LIMITS.estimatedCostCents)) return apiError("INVALID_COST", "Estimated cost must be a non-negative USD amount within the supported limit.", 400, { field: "estimatedCostUsd" });
-    const remoteMutation = Boolean(comment || status);
+    const remoteMutation = Boolean(comment || status || priority !== undefined);
     if (comment && (status || priority !== undefined || title !== undefined || description !== undefined || estimatedCostCents !== undefined)) return apiError("VALIDATION_ERROR", "A comment cannot be combined with another task mutation.", 400);
     if (!comment && status === undefined && priority === undefined && title === undefined && description === undefined && estimatedCostCents === undefined) return apiError("VALIDATION_ERROR", "At least one task field is required.", 400);
     if (process.env.EXECUTION_MODE === "live" && status !== undefined) {
@@ -42,8 +42,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ta
       return updated ? apiResponse(updated) : apiError("TASK_NOT_FOUND", "Task not found.", 404);
     }
     const key = getIdempotencyKey(request);
-    const operation = comment ? "task.comment" : "task.status";
-    const fingerprint = requestFingerprint({ taskId, status: status ?? null, comment: comment ?? null });
+    const operation = comment ? "task.comment" : "task.remote-mutation";
+    const fingerprint = requestFingerprint({ taskId, status: status ?? null, priority: priority ?? null, comment: comment ?? null });
     const claim = claimIdempotencyKey(key!, operation, fingerprint);
     if (claim.kind !== "new") return claim.kind === "replay" ? apiResponse(claim.response, claim.status) : idempotencyResponse(claim);
     try {
@@ -54,8 +54,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ta
         return apiResponse(payload);
       }
       let remote: Awaited<ReturnType<typeof syncTaskStatus>> | null = null;
-      if (process.env.EXECUTION_MODE === "live") remote = await syncTaskStatus(project, task, status!);
-      const updated = status === "done" ? completeTaskByHuman(taskId) : updateTask(taskId, { status });
+      if (process.env.EXECUTION_MODE === "live") remote = await syncTaskStatus(project, { ...task, priority: priority ?? task.priority }, status ?? task.status);
+      const updated = status === "done" ? completeTaskByHuman(taskId) : updateTask(taskId, { status, priority });
       const payload = updated ? { ...updated, remoteSync: remote } : null;
       if (!payload) {
         const errorPayload = { code: "TASK_NOT_FOUND", message: "Task not found." };

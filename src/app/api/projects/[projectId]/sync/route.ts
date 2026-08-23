@@ -40,6 +40,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     let createdIssues = 0;
     let correctedIssues = 0;
     let addedProjectItems = 0;
+    let repairedPriorities = 0;
     for (const task of getTasksByProject(projectId)) {
       const resolved = await resolveTaskIssue(project, task);
       if (resolved.created) createdIssues += 1;
@@ -48,7 +49,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
         correctedIssues += 1;
       }
       if (!items.some((item) => item.issueNumber === resolved.issue.number)) {
-        const statusSync = await reconcileResolvedTaskStatus(project, resolved.issue, task.status);
+        const statusSync = await reconcileResolvedTaskStatus(project, resolved.issue, task.status, task.priority);
         if (statusSync.projectItemAdded) addedProjectItems += 1;
       }
     }
@@ -56,12 +57,20 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     for (const item of items) {
       const result = await reconcileProjectItemLifecycle(project, item);
       if (result.issueChanged) repairedIssues += 1;
+      const localTask = getTaskByIssue(projectId, item.issueNumber);
+      const priority = item.priorityWasMissing ? localTask?.priority ?? item.priority : item.priority;
+      if (item.priorityWasMissing || (localTask && localTask.priority !== item.priority)) repairedPriorities += 1;
+      if (item.priorityWasMissing) await reconcileResolvedTaskStatus(project, { number: item.issueNumber, url: item.githubUrl ?? "", nodeId: item.contentNodeId ?? "", title: item.title, body: item.description, state: item.issueState }, item.status, priority);
       if (getTaskByIssue(projectId, item.issueNumber)) updated += 1;
       else imported += 1;
     }
-    items.forEach((item) => upsertSyncedTask({ projectId, ...item }));
+    items.forEach((item) => {
+      const localTask = getTaskByIssue(projectId, item.issueNumber);
+      const priority = item.priorityWasMissing ? localTask?.priority ?? item.priority : item.priority;
+      upsertSyncedTask({ projectId, ...item, priority });
+    });
     touchProject(projectId);
-    const payload = { ok: true, mode: "live", count: items.length, imported, updated, repairedIssues, createdIssues, correctedIssues, addedProjectItems, syncedAt: new Date().toISOString() };
+    const payload = { ok: true, mode: "live", count: items.length, imported, updated, repairedIssues, repairedPriorities, createdIssues, correctedIssues, addedProjectItems, syncedAt: new Date().toISOString() };
     completeIdempotencyKey(key!, operation, fingerprint, payload, 200);
     return apiResponse(payload);
   } catch (error) {
