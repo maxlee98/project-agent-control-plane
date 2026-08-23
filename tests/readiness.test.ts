@@ -18,7 +18,7 @@ delete process.env.CLINE_API_KEY;
 const repository = await import("../src/lib/server/repository.ts");
 const database = (await import("../src/lib/server/db.ts?readiness")).db;
 const { assessProjectReadiness, remoteRepository } = await import("../src/lib/server/readiness.ts");
-const { mapCanonicalStatusOptions } = await import("../src/lib/server/github.ts");
+const { hasCanonicalPriorityOptions, mapCanonicalPriorityOptions, mapCanonicalStatusOptions } = await import("../src/lib/server/github.ts");
 
 async function git(cwd: string, args: string[]) {
   return execFile("git", ["-C", cwd, ...args]);
@@ -59,6 +59,7 @@ test("reports missing checkout and never includes secret or command output", asy
   const report = await assessProjectReadiness(project(path.join(root, "missing")));
   assert.equal(report.overallLevel, "registered");
   assert.equal(report.checks.some((item) => item.id === "checkout.path" && item.status === "blocker"), true);
+  assert.equal(report.checks.some((item) => item.id === "github.priority_field" && item.status === "blocker"), true);
   assert.equal(JSON.stringify(report).includes("readiness-secret"), false);
   assert.equal(JSON.stringify(report).includes("stderr"), false);
 });
@@ -79,6 +80,20 @@ test("accepts only matching GitHub remotes and reports ambiguous canonical statu
   assert.equal(mappings.find((item) => item.concept === "ready")?.state, "ambiguous");
   assert.equal(mappings.find((item) => item.concept === "review")?.optionName, "Review");
   assert.equal(mappings.find((item) => item.concept === "blocked")?.state, "mapped");
+});
+
+test("requires the exact dashboard and Projects V2 P0-P3 priority contract", () => {
+  const options = [
+    { id: "p0", name: "P0" },
+    { id: "p1", name: "P1" },
+    { id: "p2", name: "P2" },
+    { id: "p3", name: "P3" },
+  ];
+  const mappings = mapCanonicalPriorityOptions(options);
+  assert.equal(hasCanonicalPriorityOptions(options), true);
+  assert.deepEqual(mappings.map((mapping) => mapping.optionName), ["P0", "P1", "P2", "P3"]);
+  assert.equal(mapCanonicalPriorityOptions([{ id: "p0-a", name: "P0" }, { id: "p0-b", name: "P0" }, ...options.slice(1)]).find((mapping) => mapping.label === "P0")?.state, "ambiguous");
+  assert.equal(hasCanonicalPriorityOptions([...options, { id: "extra", name: "Urgent" }]), false);
 });
 
 test("inspects a valid checkout without executing project validation", async () => {

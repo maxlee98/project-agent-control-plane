@@ -161,7 +161,10 @@ export function completeIdempotencyKey(key: string, operation: string, fingerpri
 export function mapProject(row: ProjectRow): Project {
   let readiness: ReadinessReport | null = null;
   if (typeof row.readiness_json === "string") {
-    try { readiness = JSON.parse(row.readiness_json) as ReadinessReport; } catch { readiness = null; }
+    try {
+      const parsed = JSON.parse(row.readiness_json) as Partial<ReadinessReport>;
+      readiness = parsed && typeof parsed === "object" && "projectPriority" in parsed ? parsed as ReadinessReport : null;
+    } catch { readiness = null; }
   }
   return {
     id: String(row.id),

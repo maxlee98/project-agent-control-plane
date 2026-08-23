@@ -3,8 +3,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { READINESS_CONTRACT_VERSION, type Project, type ProjectStatusConcept, type ReadinessCategory, type ReadinessCheck, type ReadinessReport } from "../domain";
-import { inspectProjectStatus } from "./github";
+import { PRIORITY_LABELS, READINESS_CONTRACT_VERSION, TASK_PRIORITIES, type Project, type ProjectStatusConcept, type ReadinessCategory, type ReadinessCheck, type ReadinessReport } from "../domain";
+import { inspectProjectCapabilities } from "./github";
 import { redactSecrets } from "./redaction";
 
 const execFile = promisify(execFileCallback);
@@ -175,6 +175,47 @@ function statusFieldCheck(projectStatus: ReadinessReport["projectStatus"], check
   }
 }
 
+function priorityCheckForMappings(projectPriority: ReadinessReport["projectPriority"], checks: ReadinessCheck[]) {
+  if (!projectPriority.configured) {
+    checks.push(missingCheck("github.priority_field", "github", "No GitHub Projects V2 Priority field can be inspected because no project is configured.", "Add the target Projects V2 node ID, then run readiness again.", true));
+    return;
+  }
+  if (projectPriority.reachable !== true) {
+    checks.push(check("github.priority_field", "github", "unknown", "The GitHub Projects V2 Priority field could not be inspected without exposing provider details.", "Configure GitHub access and retry readiness.", true));
+    return;
+  }
+  if (projectPriority.priorityFieldIssue === "missing_priority_field") {
+    checks.push(missingCheck("github.priority_field", "github", "The GitHub Project has no Priority field.", "Add one single-select field named Priority with exactly P0, P1, P2, and P3 options, then run readiness again.", true));
+    return;
+  }
+  if (projectPriority.priorityFieldIssue === "ambiguous_priority_fields") {
+    checks.push(missingCheck("github.priority_field", "github", "The GitHub Project has ambiguous Priority fields.", "Keep exactly one single-select field named Priority with exactly P0, P1, P2, and P3 options, then run readiness again.", true));
+    return;
+  }
+  if (projectPriority.priorityFieldIssue === "invalid_priority_options") {
+    checks.push(missingCheck("github.priority_field", "github", "The GitHub Project Priority field does not have the exact canonical P0–P3 options.", "Configure one single-select Priority field with exactly P0, P1, P2, and P3 options, then run readiness again.", true));
+    return;
+  }
+  checks.push(check("github.priority_field", "github", "pass", "The GitHub Project has the canonical P0–P3 Priority field.", "No action needed.", true));
+  for (const mapping of projectPriority.mappings) {
+    checks.push(mapping.state === "mapped"
+      ? check(`github.priority.${mapping.label}`, "github", "pass", `Priority ${mapping.label} has one canonical Project option.`, "No action needed.", true)
+      : missingCheck(`github.priority.${mapping.label}`, "github", `Priority ${mapping.label} does not have one unambiguous canonical Project option.`, "Keep exactly one matching option for each of P0, P1, P2, and P3, then run readiness again.", true));
+  }
+}
+
+function emptyPriorityMappings(state: "unavailable" | "missing" = "unavailable"): ReadinessReport["projectPriority"]["mappings"] {
+  return TASK_PRIORITIES.map((priority) => ({ priority, label: PRIORITY_LABELS[priority - 1]!, optionId: null, optionName: null, state, candidates: [] }));
+}
+
+function priorityFieldIssue(error: unknown): ReadinessReport["projectPriority"]["priorityFieldIssue"] {
+  const message = error instanceof Error ? error.message : "";
+  if (message === "GitHub Project has no Priority field.") return "missing_priority_field";
+  if (message === "GitHub Project has ambiguous Priority fields.") return "ambiguous_priority_fields";
+  if (message === "GitHub Project Priority field has invalid options.") return "invalid_priority_options";
+  return null;
+}
+
 function statusFieldIssue(error: unknown): StatusFieldIssue | null {
   const message = error instanceof Error ? error.message : "";
   if (message === "GitHub Project has no Status field.") return "missing_status_field";
@@ -232,24 +273,34 @@ export async function assessProjectReadiness(project: Project): Promise<Readines
   checks.push(check("runtime.model", "runtime", "pass", `Cline provider/model configuration is ${process.env.CLINE_PROVIDER_ID && process.env.CLINE_MODEL_ID ? "explicit" : "using safe defaults"}.`, "No action needed unless a repository requires a specific provider/model.", true));
 
   let projectStatus: ReadinessReport["projectStatus"] = { configured: Boolean(project.githubProjectId), reachable: null, fieldName: null, statusFieldIssue: null, options: [], mappings: STATUS_CONCEPTS.map((concept) => ({ concept, optionId: null, optionName: null, state: "unavailable", candidates: [] })) };
+  let projectPriority: ReadinessReport["projectPriority"] = { configured: Boolean(project.githubProjectId), reachable: null, fieldName: null, priorityFieldIssue: null, options: [], mappings: emptyPriorityMappings() };
   if (project.githubProjectId && hasGithubToken) {
     try {
-      const capability = await inspectProjectStatus(project);
-      projectStatus = { configured: true, reachable: true, fieldName: capability.fieldName, statusFieldIssue: null, options: capability.options, mappings: capability.mappings };
+      const capability = await inspectProjectCapabilities(project);
+      projectStatus = { configured: true, reachable: true, fieldName: capability.statusFieldName, statusFieldIssue: capability.statusFieldIssue, options: capability.statusOptions, mappings: capability.statusMappings };
+      projectPriority = { configured: true, reachable: true, fieldName: capability.priorityFieldName, priorityFieldIssue: capability.priorityFieldIssue, options: capability.priorityOptions, mappings: capability.priorityMappings };
     } catch (error) {
-      const issue = statusFieldIssue(error);
+      const statusIssue = statusFieldIssue(error);
+      const priorityIssue = priorityFieldIssue(error);
       projectStatus = {
         ...projectStatus,
-        reachable: issue ? true : false,
-        statusFieldIssue: issue,
-        mappings: issue
-          ? STATUS_CONCEPTS.map((concept) => ({ concept, optionId: null, optionName: null, state: issue === "ambiguous_status_fields" ? "ambiguous" : "missing", candidates: [] }))
+        reachable: statusIssue ? true : false,
+        statusFieldIssue: statusIssue,
+        mappings: statusIssue
+          ? STATUS_CONCEPTS.map((concept) => ({ concept, optionId: null, optionName: null, state: statusIssue === "ambiguous_status_fields" ? "ambiguous" : "missing", candidates: [] }))
           : projectStatus.mappings,
+      };
+      projectPriority = {
+        ...projectPriority,
+        reachable: priorityIssue ? true : false,
+        priorityFieldIssue: priorityIssue,
+        mappings: priorityIssue ? emptyPriorityMappings(priorityIssue === "ambiguous_priority_fields" ? "unavailable" : "missing") : projectPriority.mappings,
       };
     }
   }
   statusCheckForMappings(projectStatus.mappings, projectStatus.configured, projectStatus.reachable, checks);
   statusFieldCheck(projectStatus, checks);
+  priorityCheckForMappings(projectPriority, checks);
 
   const categories = addCategoryCounts(checks);
   const checkoutRootReady = Boolean(repositoryPath && checks.some((item) => item.id === "checkout.git_root" && item.status === "pass"));
@@ -270,6 +321,7 @@ export async function assessProjectReadiness(project: Project): Promise<Readines
       proposal: !localWorkflow || !pullRequestTemplate ? "create_baseline_via_pr" : "none",
     },
     projectStatus,
+    projectPriority,
   };
 }
 

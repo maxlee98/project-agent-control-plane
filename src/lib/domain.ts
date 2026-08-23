@@ -51,6 +51,15 @@ export interface ProjectStatusMapping {
   candidates: string[];
 }
 
+export interface ProjectPriorityMapping {
+  priority: TaskPriority;
+  label: (typeof PRIORITY_LABELS)[number];
+  optionId: string | null;
+  optionName: string | null;
+  state: "mapped" | "missing" | "ambiguous" | "unavailable";
+  candidates: string[];
+}
+
 export interface ReadinessCheck {
   id: string;
   category: ReadinessCategory;
@@ -81,6 +90,14 @@ export interface ReadinessReport {
     statusFieldIssue?: "missing_status_field" | "ambiguous_status_fields" | null;
     options: string[];
     mappings: ProjectStatusMapping[];
+  };
+  projectPriority: {
+    configured: boolean;
+    reachable: boolean | null;
+    fieldName: string | null;
+    priorityFieldIssue?: "missing_priority_field" | "ambiguous_priority_fields" | "invalid_priority_options" | null;
+    options: string[];
+    mappings: ProjectPriorityMapping[];
   };
 }
 

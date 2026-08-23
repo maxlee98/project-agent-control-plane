@@ -4,6 +4,12 @@ Adding a repository only registers its GitHub name and local checkout. It does n
 checkout, install dependencies, create branches, or open pull requests. Use **Check now** on the
 dashboard (or select it during registration) to run the non-mutating readiness assessment.
 
+All managed Issues use the dashboard's canonical priority vocabulary: `P0`, `P1`, `P2`, and `P3`.
+Live readiness requires the target GitHub Projects V2 board to expose exactly one single-select
+`Priority` field with exactly those four options. The same value must be present on the Project item
+before a synchronized Issue is reported successful; readiness does not use or create GitHub labels for
+this contract.
+
 Each report includes a contract version, check timestamp, overall level, category counts, safe
 remediation, and a baseline summary:
 
@@ -31,3 +37,5 @@ summary pull request. It never edits the configured checkout directly and never 
 Live synchronization requires one unambiguous GitHub Projects V2 Status option for each canonical
 concept: `Ready`, `In progress`, `Review`, `Blocked`, and `Done`. Case, spacing, and hyphen aliases
 are normalized, but duplicate matches are reported as ambiguous and block Live synchronization.
+Priority names are intentionally exact: extra, missing, duplicate, or differently named options fail
+readiness with an actionable remediation.

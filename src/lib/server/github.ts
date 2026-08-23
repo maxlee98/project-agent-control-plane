@@ -1,5 +1,5 @@
-import { DEFAULT_TASK_PRIORITY, priorityFromLabel, priorityLabel, type AgentRun, type Project, type Task, type TaskPriority, type TaskStatus } from "../domain";
-import type { ProjectStatusConcept, ProjectStatusMapping } from "../domain";
+import { DEFAULT_TASK_PRIORITY, PRIORITY_LABELS, priorityFromLabel, priorityLabel, TASK_PRIORITIES, type AgentRun, type Project, type Task, type TaskPriority, type TaskStatus } from "../domain";
+import type { ProjectPriorityMapping, ProjectStatusConcept, ProjectStatusMapping } from "../domain";
 import { normalizePrTitle } from "../pr-title";
 
 function githubRequest(path: string, init: RequestInit = {}) {
@@ -48,6 +48,24 @@ export interface ProjectStatusCapability {
   fieldName: string;
   options: string[];
   mappings: ProjectStatusMapping[];
+}
+
+export type ProjectCapabilityFieldIssue =
+  | "missing_status_field"
+  | "ambiguous_status_fields"
+  | "missing_priority_field"
+  | "ambiguous_priority_fields"
+  | "invalid_priority_options";
+
+export interface ProjectCapabilities {
+  statusFieldName: string | null;
+  statusOptions: string[];
+  statusMappings: ProjectStatusMapping[];
+  statusFieldIssue: "missing_status_field" | "ambiguous_status_fields" | null;
+  priorityFieldName: string | null;
+  priorityOptions: string[];
+  priorityMappings: ProjectPriorityMapping[];
+  priorityFieldIssue: "missing_priority_field" | "ambiguous_priority_fields" | "invalid_priority_options" | null;
 }
 
 type IssueApiRecord = {
@@ -107,8 +125,8 @@ type ProjectField = { id: string; name?: string; options?: StatusOption[] };
 function requiredPriorityOptions(field: ProjectField | undefined) {
   if (!field) throw new Error("GitHub Projects V2 has no usable Priority field. Create a single-select Priority field with P0, P1, P2, and P3 options.");
   const options = field.options ?? [];
-  const matches = ["P0", "P1", "P2", "P3"].map((name) => options.filter((option) => option.name.trim().toUpperCase() === name));
-  if (matches.some((values) => values.length !== 1)) throw new Error("GitHub Projects V2 Priority field must contain exactly one option for each of P0, P1, P2, and P3.");
+  const matches = PRIORITY_LABELS.map((name) => options.filter((option) => option.name.trim() === name));
+  if (options.length !== PRIORITY_LABELS.length || matches.some((values) => values.length !== 1)) throw new Error("GitHub Projects V2 Priority field must contain exactly the P0, P1, P2, and P3 options.");
   return matches.map((values) => values[0]!);
 }
 
@@ -151,10 +169,36 @@ export function mapCanonicalStatusOptions(options: StatusOption[]): ProjectStatu
   });
 }
 
-export async function inspectProjectStatus(project: Project): Promise<ProjectStatusCapability> {
+export function mapCanonicalPriorityOptions(options: StatusOption[]): ProjectPriorityMapping[] {
+  return TASK_PRIORITIES.map((priority) => {
+    const label = PRIORITY_LABELS[priority - 1]!;
+    const candidates = options.filter((option) => priorityFromLabel(option.name) === priority);
+    return {
+      priority,
+      label,
+      optionId: candidates.length === 1 ? candidates[0].id : null,
+      optionName: candidates.length === 1 ? candidates[0].name : null,
+      state: candidates.length === 1 ? "mapped" : candidates.length === 0 ? "missing" : "ambiguous",
+      candidates: candidates.map((option) => option.name),
+    };
+  });
+}
+
+export function hasCanonicalPriorityOptions(options: StatusOption[]) {
+  return options.length === PRIORITY_LABELS.length
+    && PRIORITY_LABELS.every((label) => options.filter((option) => option.name.trim() === label).length === 1);
+}
+
+function priorityFieldIssue(field: ProjectField | undefined): ProjectCapabilities["priorityFieldIssue"] {
+  if (!field) return "missing_priority_field";
+  const options = field.options ?? [];
+  return hasCanonicalPriorityOptions(options) ? null : "invalid_priority_options";
+}
+
+export async function inspectProjectCapabilities(project: Project): Promise<ProjectCapabilities> {
   if (!project.githubProjectId) throw new Error("GitHub Projects V2 is not configured.");
   type ProjectData = { node: { __typename: string; fields: { nodes: Array<{ id: string; name?: string; options?: StatusOption[] }> } } | null };
-  const data = await graphql<ProjectData>(`query ProjectStatus($id: ID!) {
+  const data = await graphql<ProjectData>(`query ProjectCapabilities($id: ID!) {
     node(id: $id) {
       __typename
       ... on ProjectV2 {
@@ -170,10 +214,27 @@ export async function inspectProjectStatus(project: Project): Promise<ProjectSta
   if (!data.node) throw new Error("GitHub Project was not found or is not accessible.");
   if (data.node.__typename !== "ProjectV2") throw new Error("GitHub node is not a Projects V2 project.");
   const statusFields = data.node.fields.nodes.filter((field) => normalizedOptionName(field.name ?? "") === "status");
-  if (statusFields.length !== 1) throw new Error(statusFields.length === 0 ? "GitHub Project has no Status field." : "GitHub Project has ambiguous Status fields.");
-  const field = statusFields[0];
-  const options = field.options ?? [];
-  return { fieldName: field.name ?? "Status", options: options.map((option) => option.name), mappings: mapCanonicalStatusOptions(options) };
+  const priorityFields = data.node.fields.nodes.filter((field) => normalizedOptionName(field.name ?? "") === "priority");
+  const statusField = statusFields.length === 1 ? statusFields[0] : undefined;
+  const priorityField = priorityFields.length === 1 ? priorityFields[0] : undefined;
+  const statusOptions = statusField?.options ?? [];
+  const priorityOptions = priorityField?.options ?? [];
+  return {
+    statusFieldName: statusField?.name ?? null,
+    statusOptions: statusOptions.map((option) => option.name),
+    statusMappings: mapCanonicalStatusOptions(statusOptions),
+    statusFieldIssue: statusFields.length === 0 ? "missing_status_field" : statusFields.length > 1 ? "ambiguous_status_fields" : null,
+    priorityFieldName: priorityField?.name ?? null,
+    priorityOptions: priorityOptions.map((option) => option.name),
+    priorityMappings: mapCanonicalPriorityOptions(priorityOptions),
+    priorityFieldIssue: priorityFields.length === 0 ? "missing_priority_field" : priorityFields.length > 1 ? "ambiguous_priority_fields" : priorityFieldIssue(priorityField),
+  };
+}
+
+export async function inspectProjectStatus(project: Project): Promise<ProjectStatusCapability> {
+  const capability = await inspectProjectCapabilities(project);
+  if (capability.statusFieldIssue) throw new Error(capability.statusFieldIssue === "missing_status_field" ? "GitHub Project has no Status field." : "GitHub Project has ambiguous Status fields.");
+  return { fieldName: capability.statusFieldName!, options: capability.statusOptions, mappings: capability.statusMappings };
 }
 
 function issueStateForTaskStatus(status: TaskStatus): "open" | "closed" {

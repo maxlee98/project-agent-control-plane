@@ -7,6 +7,8 @@
 - Related task or issue: GitHub Issue #61
 
 ## Problem
+Priority: P2
+
 Registered repositories currently appear usable even when their checkout, policy, validation,
 runtime, GitHub, or Project configuration cannot support a safe Live run. The Add repository flow
 also has no explicit, non-mutating onboarding assessment or baseline-via-PR path.
@@ -14,8 +16,8 @@ also has no explicit, non-mutating onboarding assessment or baseline-via-PR path
 ## Goals
 - Provide a safe, structured readiness assessment for a registered repository.
 - Distinguish registered, inspectable, Demo-ready, and Live-ready states.
-- Detect local checkout/Git/worktree, policy, skills, validation, runtime, GitHub, Project status,
-  and PR/handoff prerequisites without exposing secrets or executing untrusted commands.
+- Detect local checkout/Git/worktree, policy, skills, validation, runtime, GitHub, Project status and
+  Priority, and PR/handoff prerequisites without exposing secrets or executing untrusted commands.
 - Persist the latest report for the dashboard and gate Live dispatch with a fresh required check.
 - Present missing policy/template files as an explicit baseline pull-request proposal.
 
@@ -31,6 +33,9 @@ also has no explicit, non-mutating onboarding assessment or baseline-via-PR path
 - Live is blocked by unresolved required checks and rechecks immediately before dispatch.
 - Project statuses map explicitly to Ready, In progress, Review, Blocked, and Done; missing or
   ambiguous mappings are visible.
+- Every managed Issue/task uses the same mandatory P0–P3 priority vocabulary in the dashboard and the
+  GitHub Projects V2 single-select Priority field; missing, ambiguous, or non-exact configuration
+  blocks Live synchronization.
 - Baseline preparation is branch-and-PR first and never silently changes the checkout.
 
 ## Existing architecture
@@ -42,8 +47,8 @@ is in `ControlPlane.tsx`; `domain.ts` contains API-facing types.
 ## Proposed design
 Add a pure readiness domain contract and server assessment service. Local inspection uses bounded
 Git commands and filesystem metadata only. Validation uses the existing explicit allowlist detector.
-Runtime checks inspect configuration presence only. GitHub readiness is adapter-backed and maps
-canonical status concepts by normalized unique aliases. Reports are stored as a JSON snapshot on the
+GitHub readiness is adapter-backed and maps canonical status concepts by normalized unique aliases,
+while requiring one exact single-select Priority field with P0, P1, P2, and P3 options. Reports are stored as a JSON snapshot on the
 project, exposed through a project readiness route, and consumed by the dashboard and Live preflight.
 Baseline support starts as an explicit proposal response; target mutations and PR creation remain a
 separate approved action boundary.
@@ -62,7 +67,8 @@ shows the unresolved remediation.
 - `src/lib/domain.ts`: readiness levels, checks, status mapping, dashboard contract.
 - `src/lib/server/readiness.ts`: bounded local/configuration assessment and redaction.
 - `src/lib/server/db.ts`, `repository.ts`: report persistence and project mapping.
-- `src/lib/server/workspaces.ts`, `github.ts`: inspection seams and status capability mapping.
+- `src/lib/server/workspaces.ts`, `github.ts`: inspection seams, status capability mapping, and
+  canonical Priority validation.
 - `src/app/api/projects/[projectId]/readiness/route.ts`: user-triggered report endpoint.
 - `src/lib/server/orchestrator.ts`: Live preflight gate.
 - `src/components/ControlPlane.tsx`: readiness card and remediation.
@@ -78,7 +84,8 @@ call; no destructive migration is required.
 
 ## Validation plan
 - Unit tests for valid/missing/invalid checkout and remote, policy/template/skills detection,
-  validation detection, status alias ambiguity, redaction, and readiness levels.
+  validation detection, status alias ambiguity, exact P0–P3 Priority validation, redaction, and
+  readiness levels.
 - Existing focused test suite, typecheck, production build, and whitespace validation.
 
 ## Decision log
