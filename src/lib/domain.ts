@@ -17,6 +17,52 @@ export type TaskCostStatus = "not_started" | "pending" | "available" | "partial"
 export const REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 
+export const READINESS_CONTRACT_VERSION = "1.0";
+export type ReadinessLevel = "registered" | "inspectable" | "demo_ready" | "live_ready";
+export type ReadinessCheckStatus = "pass" | "warning" | "blocker" | "unknown";
+export type ReadinessCategory = "checkout" | "policy" | "validation" | "github" | "runtime" | "handoff";
+export type ProjectStatusConcept = "ready" | "in_progress" | "review" | "blocked" | "done";
+
+export interface ProjectStatusMapping {
+  concept: ProjectStatusConcept;
+  optionId: string | null;
+  optionName: string | null;
+  state: "mapped" | "missing" | "ambiguous" | "unavailable";
+  candidates: string[];
+}
+
+export interface ReadinessCheck {
+  id: string;
+  category: ReadinessCategory;
+  status: ReadinessCheckStatus;
+  summary: string;
+  remediation: string;
+  liveRequired: boolean;
+}
+
+export interface ReadinessReport {
+  contractVersion: string;
+  checkedAt: string;
+  overallLevel: ReadinessLevel;
+  checks: ReadinessCheck[];
+  categories: Record<ReadinessCategory, { pass: number; warning: number; blocker: number; unknown: number }>;
+  baseline: {
+    workflow: "local" | "default" | "missing";
+    workflowPath: string | null;
+    agents: boolean;
+    skills: boolean;
+    pullRequestTemplate: boolean;
+    proposal: "none" | "create_baseline_via_pr";
+  };
+  projectStatus: {
+    configured: boolean;
+    reachable: boolean | null;
+    fieldName: string | null;
+    options: string[];
+    mappings: ProjectStatusMapping[];
+  };
+}
+
 export interface ReasoningCapability {
   providerId: string;
   modelId: string;
@@ -140,6 +186,7 @@ export interface Project {
   activeAgents: number;
   openTasks: number;
   openPrs: number;
+  readiness?: ReadinessReport | null;
 }
 
 export interface Task {
