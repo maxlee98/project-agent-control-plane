@@ -8,19 +8,13 @@ test("translates agent content into stable control-plane events", () => {
     type: "agent_event",
     payload: { event: { type: "content_start", contentType: "tool", toolName: "read_file" } },
   });
-  assert.deepEqual(toolStart, {
-    type: "tool_started",
-    message: "Agent started a tool",
-    detail: "read_file",
-    checkpoint: false,
-  });
+  assert.equal(toolStart, null);
 
   const toolEnd = translateClineEvent({
     type: "agent_event",
     payload: { event: { type: "content_end", contentType: "tool", toolName: "read_file" } },
   });
-  assert.equal(toolEnd?.type, "tool_finished");
-  assert.equal(toolEnd?.message, "Agent finished a tool");
+  assert.equal(toolEnd, null);
 
   const output = translateClineEvent({
     type: "agent_event",
@@ -35,8 +29,8 @@ test("translates agent content into stable control-plane events", () => {
 });
 
 test("keeps useful progress while omitting low-value SDK chatter", () => {
-  assert.equal(translateClineEvent({ type: "agent_event", payload: { event: { type: "notice", message: "Compacting context" } } })?.type, "progress");
-  assert.equal(translateClineEvent({ type: "hook", payload: { hookEventName: "tool_result", toolName: "search" } })?.type, "tool_finished");
+  assert.equal(translateClineEvent({ type: "agent_event", payload: { event: { type: "notice", message: "Compacting context" } } }), null);
+  assert.equal(translateClineEvent({ type: "hook", payload: { hookEventName: "tool_result", toolName: "search" } }), null);
   assert.equal(translateClineEvent({ type: "status", payload: { status: "running" } }), null);
   assert.equal(translateClineEvent({ type: "chunk", payload: { chunk: "raw model output" } }), null);
   assert.equal(translateClineEvent({ type: "agent_event", payload: { event: { type: "usage", totalInputTokens: 20 } } }), null);
@@ -48,7 +42,7 @@ test("keeps useful progress while omitting low-value SDK chatter", () => {
 test("redacts and bounds selected details while excluding session identifiers", () => {
   const event = translateClineEvent({
     type: "agent_event",
-    payload: { sessionId: "session-secret-id", event: { type: "content_start", contentType: "text", text: "working" } },
+    payload: { sessionId: "session-secret-id", event: { type: "content_end", contentType: "text", text: "working" } },
   });
   assert.equal(event?.detail?.includes("session-secret-id"), false);
 });

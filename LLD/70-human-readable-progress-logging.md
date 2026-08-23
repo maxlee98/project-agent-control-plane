@@ -2,7 +2,7 @@
 
 ## Status
 
-- **Status:** Implemented; ready for PR handoff
+- **Status:** Implemented; meaningful-output follow-up validated locally
 - **Owner:** Project Agent Control Plane
 - **Date:** 2026-08-23
 - **Related task or issue:** GitHub Issue #70 — [Refactor agent logs into human-readable progress updates](https://github.com/maxlee98/project-agent-control-plane/issues/70)
@@ -37,7 +37,8 @@ the Cline vocabulary or changing the Issue #36 result-authoritative completion b
 
 - Do not expose Cline SDK event names or raw event payloads through the domain or UI.
 - Do not persist prompts, reasoning, provider responses, raw tool input/output, credentials, session
-  identifiers, or arbitrary command output.
+  identifiers, or arbitrary command output. A bounded completed agent output summary is retained only
+  when it provides useful human-facing progress or a result.
 - Do not publish every tool call, output chunk, usage update, or internal status to GitHub.
 - Do not infer completion from an SDK `done`, `ended`, hook, or status event; `AgentResult` remains the
   authoritative live-run result.
@@ -47,7 +48,8 @@ the Cline vocabulary or changing the Issue #36 result-authoritative completion b
 
 ## Requirements and acceptance criteria
 
-- The event trace shows only useful stable milestones or concise progress summaries.
+- The event trace shows only useful stable milestones or concise progress summaries; tool calls and SDK
+  output chatter are not persisted as human-facing events.
 - A run's current activity identifies the stage and the runner's intent.
 - Safe file/code-area summaries are bounded and redact secrets.
 - Duplicate progress is suppressed and high-frequency progress is rate-limited per run.
@@ -86,9 +88,9 @@ recognized event into a visible record to the following policy:
 
 - Ignore usage, generic status, snapshots, raw chunks, and internal updates unless they provide a
   genuinely new safe human-facing fact.
-- Convert meaningful notices and waiting-for-input signals into concise progress messages.
-- Retain tool lifecycle only when it communicates a meaningful operation, with a safe tool name and no
-  input/output payload. Repeated tool-progress updates should be omitted or coalesced.
+- Ignore generic notices; convert explicit waiting-for-input signals into concise progress messages.
+- Omit tool lifecycle events entirely from the human-facing trace. Tool names and tool errors remain
+  implementation diagnostics, not progress milestones.
 - Treat text/content as a summary candidate only after bounded redaction and only when it adds intent or
   a useful result; do not mirror model output into the trace.
 - Keep error and terminal observations available for local diagnostics, but do not let them determine
@@ -200,6 +202,11 @@ Rollback is a code revert. No destructive database or remote operation is requir
   do not trust arbitrary SDK file fields until a narrow allowlist is defined.
 - 2026-08-23: Keep local useful progress and remote Issue checkpoints as separate retention policies,
   sharing the same human-readable projection but not the same publication frequency.
+- 2026-08-23: Retain bounded completed agent output summaries as human-facing `Now` progress, while
+  dropping tool lifecycle, session-start, generic notice, and raw output-start events from visible run
+  history. GitHub receives the summary through the same throttled checkpoint projection.
+- 2026-08-23: GitHub checkpoints expose a safe workspace label rather than an absolute local path, plus
+  the branch, current intent, next action, validation result, and handoff metadata.
 
 ## Completion checklist
 
@@ -216,15 +223,19 @@ Rollback is a code revert. No destructive database or remote operation is requir
 
 - Low-value Cline usage, iteration, status, team-progress, snapshots, raw chunks, session shutdown,
   unknown hooks, and unsupported envelopes are omitted at the adapter boundary.
-- Human-facing tool lifecycle, notices, waiting-for-input signals, errors, and terminal observations
-  remain stable and redacted; completion still comes from the returned `AgentResult`.
+- Human-facing completed output summaries remain stable, redacted, and bounded. Tool lifecycle, generic
+  notices, and session-start observations are omitted; completion still comes from the returned
+  `AgentResult`.
 - Issue checkpoint publication now deduplicates identical rendered content while retaining the existing
   forced milestone and failure-tolerant queue behavior.
+- Issue checkpoints now include a safe workspace label, branch, current intent (`Now`), next action,
+  validation result, and handoff metadata. Full local workspace paths remain in the Run console.
 
 ## Validation results
 
-- Focused Cline, checkpoint, and live-run validation — passed, 22 tests, 0 failures.
-- Full test suite — passed, 97 tests, 0 failures.
+- Focused Cline, checkpoint, GitHub boundary, live-run, and legacy-event filtering validation — passed,
+  53 tests, 0 failures.
+- Full test suite — passed, 101 tests, 0 failures.
 - Typecheck — passed; `tsc --noEmit` completed without diagnostics.
 - Production build — passed; Next.js compiled, typechecked, and generated all application routes.
   The existing non-fatal Turbopack NFT tracing warning remains unrelated.

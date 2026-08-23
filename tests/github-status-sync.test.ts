@@ -86,6 +86,7 @@ globalThis.fetch = async (input, init) => {
     }
     return response({ number: 42, html_url: "https://github.com/maxlee98/project-agent-control-plane/pull/42" });
   }
+  if (url.includes("/comments") && method === "POST") return response({ id: 1 });
   if (url.endsWith("/issues/10") && method === "GET") return response({ number: 10, node_id: "issue-node-10", html_url: "https://github.com/maxlee98/project-agent-control-plane/issues/10", title: "Task #10", state: issueState });
   if (url.endsWith("/issues/10") && method === "PATCH") {
     issueState = (body?.state as "open" | "closed") ?? issueState;
@@ -128,6 +129,20 @@ test("uses the canonical P0-P3 mapping and includes priority in new Issue bodies
   await github.createIssue(project().fullName, "Priority body contract", "## Summary\n\nBody", 1);
   const issueRequest = calls.find((call) => call.url.endsWith("/issues") && call.method === "POST");
   assert.equal(issueRequest?.body?.body, "Priority: P0\n\n## Summary\n\nBody");
+});
+
+test("redacts direct Issue and comment content before remote publication", async () => {
+  calls.length = 0;
+  await github.createIssue(project().fullName, "Safe issue", "A token=unsafe-value must not leave the process.", 3);
+  const issueRequest = calls.find((call) => call.url.endsWith("/issues") && call.method === "POST");
+  assert.equal(String(issueRequest?.body?.body).includes("token=unsafe-value"), false);
+  assert.equal(String(issueRequest?.body?.body).includes("[REDACTED_SECRET]"), true);
+
+  calls.length = 0;
+  await github.publishComment(project().fullName, 18, "A password=unsafe-value must not be published.");
+  const commentRequest = calls.find((call) => call.url.includes("/comments") && call.method === "POST");
+  assert.equal(String(commentRequest?.body?.body).includes("password=unsafe-value"), false);
+  assert.equal(String(commentRequest?.body?.body).includes("[REDACTED_SECRET]"), true);
 });
 
 test("maps the exact Projects V2 Review option to the human review state", async () => {

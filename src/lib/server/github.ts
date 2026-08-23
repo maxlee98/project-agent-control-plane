@@ -1,5 +1,6 @@
 import { DEFAULT_TASK_PRIORITY, priorityFromLabel, priorityLabel, type AgentRun, type Project, type Task, type TaskPriority, type TaskStatus } from "../domain";
 import { normalizePrTitle } from "../pr-title";
+import { redactSecrets } from "./redaction";
 
 function githubRequest(path: string, init: RequestInit = {}) {
   const token = process.env.GITHUB_TOKEN;
@@ -366,7 +367,7 @@ export async function createPullRequest(fullName: string, task: Task, run: Agent
   const existing = await findOpenPullRequest(owner, repo, head, base);
   if (existing) return existing;
 
-  const response = await githubRequest(`/repos/${owner}/${repo}/pulls`, { method: "POST", body: JSON.stringify({ title: normalizePrTitle(task.title, task.labels), head, base, body: `Fixes #${task.issueNumber}\n\n${task.currentSummary}\n\nCommit: ${run.commitSha ?? "not recorded"}` }) });
+  const response = await githubRequest(`/repos/${owner}/${repo}/pulls`, { method: "POST", body: JSON.stringify({ title: redactSecrets(normalizePrTitle(task.title, task.labels)) ?? "Agent implementation", head, base, body: redactSecrets(`Fixes #${task.issueNumber}\n\n${task.currentSummary}\n\nCommit: ${run.commitSha ?? "not recorded"}`) ?? "" }) });
   if (response.status === 422) {
     const createdByRetry = await findOpenPullRequest(owner, repo, head, base);
     if (createdByRetry) return createdByRetry;
@@ -387,13 +388,13 @@ async function findOpenPullRequest(owner: string, repo: string, head: string, ba
 
 export async function publishComment(fullName: string, issueNumber: number, body: string) {
   const { owner, repo } = repoParts(fullName);
-  await readResponse(await githubRequest(`/repos/${owner}/${repo}/issues/${issueNumber}/comments`, { method: "POST", body: JSON.stringify({ body }) }));
+  await readResponse(await githubRequest(`/repos/${owner}/${repo}/issues/${issueNumber}/comments`, { method: "POST", body: JSON.stringify({ body: redactSecrets(body) ?? "" }) }));
 }
 
 export async function createIssue(fullName: string, title: string, body: string, priority: TaskPriority = DEFAULT_TASK_PRIORITY): Promise<CreatedIssue> {
   const { owner, repo } = repoParts(fullName);
-  const issueBody = `Priority: ${priorityLabel(priority)}\n\n${body.trim()}`;
-  const result = await readResponse(await githubRequest(`/repos/${owner}/${repo}/issues`, { method: "POST", body: JSON.stringify({ title, body: issueBody }) }));
+  const issueBody = redactSecrets(`Priority: ${priorityLabel(priority)}\n\n${body.trim()}`) ?? "";
+  const result = await readResponse(await githubRequest(`/repos/${owner}/${repo}/issues`, { method: "POST", body: JSON.stringify({ title: redactSecrets(title) ?? "Agent task", body: issueBody }) }));
   const nodeId = String(result.node_id ?? "");
   if (!nodeId) throw new Error("GitHub created the Issue but did not return its node ID for Projects V2 insertion.");
   const number = Number(result.number);
