@@ -53,7 +53,9 @@ npm run dev
 Open [http://localhost:3000](http://localhost:3000).
 
 The local database is created at `.data/control-plane.db`. Delete `.data` to reset the seeded
-demo state.
+demo state. SQLite migrations are versioned and create a bounded pre-migration backup under
+`.data/backups/`; see [local operations](docs/local-operations.md) before changing or restoring
+the database.
 
 ## Enable live runs
 
@@ -99,6 +101,10 @@ npm run build      # production build
 npm run start      # start production build
 npm run typecheck  # TypeScript validation
 ```
+
+Local SQLite migrations, backup/checkpoint, restore, and conservative history-retention rules are
+documented in [docs/local-operations.md](docs/local-operations.md). The retention defaults can be
+overridden with the `*_RETENTION_DAYS` variables in `.env.local`.
 
 ## Repository setup
 

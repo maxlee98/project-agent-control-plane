@@ -24,3 +24,14 @@ control plane should keep an append-only local record of the side effects it ini
 
 When the tool is hosted, add GitHub App installation scoping, per-user authorization, remote
 worker isolation, encrypted secrets, and audit-log retention before allowing multi-user access.
+
+## SQLite backups and retention
+
+The local database and its migration backups may contain task descriptions, activity, run errors, and
+workspace metadata. Keep `DATA_DIR` access-restricted and do not upload `.data/backups/` to an issue,
+pull request, or shared artifact store. Automatic migration backups contain database data but do not
+print it to logs. Retention is delete-only maintenance, not a security erasure guarantee: active,
+failed, stopped, worktree-bearing, and human-review evidence is intentionally preserved for recovery.
+Restore only while the app is stopped, remove stale SQLite `-wal`/`-shm` sidecars after replacing the
+database, and restart so the normal migration check can run. Never restore by manually changing
+`schema_migrations`.
