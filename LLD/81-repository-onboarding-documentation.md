@@ -141,7 +141,10 @@ impact.
 - `npm run safe:run -- --timeout-ms 30000 -- git diff --cached --check` — passed for the final staged
   documentation diff.
 - `npm run safe:run -- --timeout-ms 30000 -- node scripts/verify-branch-freshness.mjs --base main
-  --head docs/81-repository-onboarding-documentation` — passed; status `ahead`, ahead `3`, behind `0`.
+  --head docs/81-repository-onboarding-documentation` — passed; status `ahead`, ahead `4`, behind `0`.
+- PR #82 — verified open at https://github.com/maxlee98/project-agent-control-plane/pull/82 with
+  base `main`, head `docs/81-repository-onboarding-documentation`, the completed PR template, and
+  `Fixes #81` linkage.
 
 ## Decision log
 
@@ -150,6 +153,7 @@ impact.
 - 2026-08-23: Keep this task documentation-only; the readiness implementation is available from the
   current `main` baseline and is documented rather than changed here.
 - 2026-08-23: Issue #81 is the canonical task identity and will be linked with `Fixes #81` in the PR.
+- 2026-08-23: PR #82 was opened and verified; merge remains intentionally pending human review.
 
 ## Completion checklist
 
@@ -159,5 +163,5 @@ impact.
 - [x] Links and wording reviewed against current implementation
 - [x] Diff check, tests, typecheck, and build passed
 - [x] Branch freshness verified
-- [ ] Template-compliant PR opened and verified
+- [x] Template-compliant PR opened and verified
 - [ ] Human merge approval remains pending
